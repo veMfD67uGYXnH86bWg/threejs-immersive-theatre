@@ -1,0 +1,51 @@
+* {
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.webgl {
+  position: fixed;
+  top: 0;
+  left: 0;
+  outline: none;
+  touch-action: none;
+}
+
+:root {
+  --classic-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  --tp-base-background-color: hsla(40, 3%, 90%, 1.00);
+  --tp-base-shadow-color: hsla(0, 0%, 0%, 0.30);
+  --tp-button-background-color: hsla(40, 3%, 70%, 1.00);
+  --tp-button-background-color-active: hsla(40, 3%, 55%, 1.00);
+  --tp-button-background-color-focus: hsla(40, 3%, 60%, 1.00);
+  --tp-button-background-color-hover: hsla(40, 3%, 65%, 1.00);
+  --tp-button-foreground-color: hsla(40, 3%, 20%, 1.00);
+  --tp-container-background-color: hsla(40, 3%, 70%, 1.00);
+  --tp-container-background-color-active: hsla(40, 3%, 55%, 1.00);
+  --tp-container-background-color-focus: hsla(40, 3%, 60%, 1.00);
+  --tp-container-background-color-hover: hsla(40, 3%, 65%, 1.00);
+  --tp-container-foreground-color: hsla(40, 0%, 0%, 1.00);
+  --tp-groove-foreground-color: hsla(40, 3%, 40%, 1.00);
+  --tp-input-background-color: hsla(120, 3%, 20%, 1.00);
+  --tp-input-background-color-active: hsla(120, 3%, 35%, 1.00);
+  --tp-input-background-color-focus: hsla(120, 3%, 30%, 1.00);
+  --tp-input-background-color-hover: hsla(120, 3%, 25%, 1.00);
+  --tp-input-foreground-color: hsla(120, 40%, 60%, 1.00);
+  --tp-label-foreground-color: hsla(40, 0%, 4%, 1.00);
+  --tp-monitor-background-color: hsla(120, 3%, 20%, 1.00);
+  --tp-monitor-foreground-color: hsla(120, 40%, 60%, 0.80);
+}
+
+.debug-ui {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  width: 320px;
+}
