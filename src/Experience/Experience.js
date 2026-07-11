@@ -7,6 +7,9 @@ import Camera from './Camera.js'
 import Renderer from './Renderer.js'
 import World from './World/World.js'
 import Resources from './utils/Resources.js'
+import NetworkManager from './Network/NetworkManager.js'
+import AudioManager from './Audio/AudioManager.js'
+import UI from './UI/UI.js'
 
 import sources from './sources.js'
 
@@ -35,9 +38,12 @@ export default class Experience {
         }
 
         this.resources = new Resources(sources)
+        this.network = new NetworkManager()
         this.camera = new Camera()
+        this.audio = new AudioManager()
         this.renderer = new Renderer()
         this.world = new World()
+        this.ui = new UI()
 
 
         this.sizes.on('resize', () => {
@@ -85,6 +91,7 @@ export default class Experience {
 
         this.camera.controls.dispose()
         this.renderer.instance.dispose()
+        this.network.socket.disconnect()
 
         if (this.debug.active)
             this.debug.ui.destroy()

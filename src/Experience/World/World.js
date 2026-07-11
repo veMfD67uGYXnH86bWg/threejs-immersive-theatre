@@ -2,6 +2,11 @@ import * as THREE from 'three/webgpu'
 import Experience from '../Experience.js'
 import Environment from './Environment.js'
 import Terrain from './Terrain.js'
+import Stage from './Stage.js'
+import TheatreSeats from './TheatreSeats.js'
+import PlayerManager from './PlayerManager.js'
+import ChatBubbles from './ChatBubbles.js'
+import Dancer from './Dancer.js'
 
 export default class World {
     constructor() {
@@ -12,7 +17,10 @@ export default class World {
         this.resources.on('ready', () => {
             this.environment = new Environment()
             this.terrain = new Terrain()
-            this.characters = new Characters()
+            this.stage = new Stage()
+            this.dancer = new Dancer()
+            this.theatreSeats = new TheatreSeats()
+            this.playerManager = new PlayerManager()
             this.chatBubbles = new ChatBubbles()
         })
 
@@ -24,10 +32,13 @@ export default class World {
         if (this.environment)
             this.environment.update()
 
-        if (this.characters)
-            this.characters.update()
+        if (this.playerManager)
+            this.playerManager.update()
 
         if (this.chatBubbles)
             this.chatBubbles.update()
+
+        if (this.dancer)
+            this.dancer.update()
     }
 }

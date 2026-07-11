@@ -1,14 +1,97 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta content="width=device-width, initial-scale=1.0" name="viewport">
-  <title>[WIP] ThreeJS Kpop Theatre</title>
-  <link href="./src/style.css" rel="stylesheet">
-  <!--  <link href="favicon.png" rel="icon" type="image/x-icon">-->
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Immersive Theatre</title>
+    <link href="./src/style.css" rel="stylesheet">
+    <!--  <link href="favicon.png" rel="icon" type="image/x-icon">-->
 </head>
 <body>
-  <canvas class="webgl"></canvas>
-  <script src="./src/main.js" type="module"></script>
+    <canvas class="webgl"></canvas>
+
+    <div id="ui">
+        <div class="panel" id="lobby">
+            <h1>Immersive Theatre</h1>
+            <input autocomplete="off" id="lobby-username" maxlength="16" placeholder="Your username">
+            <div id="lobby-home">
+                <button class="primary" id="lobby-quick">Quick Join</button>
+                <div class="lobby-row">
+                    <button id="lobby-create">Create Room</button>
+                    <label class="lobby-private"><input id="lobby-private" type="checkbox"> Private</label>
+                </div>
+                <div class="lobby-row">
+                    <input autocomplete="off" id="lobby-code" maxlength="8" placeholder="Room code">
+                    <button id="lobby-join-code">Join</button>
+                </div>
+                <div class="lobby-rooms-header">
+                    <span>Public rooms</span>
+                    <button id="lobby-refresh" title="Refresh">&#x21bb;</button>
+                </div>
+                <ul id="lobby-rooms"></ul>
+            </div>
+            <div class="hidden" id="lobby-invite">
+                <p id="lobby-invite-text"></p>
+                <button class="primary" id="lobby-invite-join">Join room</button>
+                <button id="lobby-invite-back">Back to lobby</button>
+            </div>
+            <p id="lobby-error"></p>
+            <div id="lobby-disclaimer">
+                <p>⚠️ Photosensitivity warning: music videos and stage lighting may contain flashing lights and bright
+                    colours.</p>
+                <div class="disclaimer-actions">
+                    <label><input checked id="disclaimer-remember" type="checkbox"> Remember my choice</label>
+                    <button id="disclaimer-accept" type="button">I understand</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="hidden" id="hud">
+            <div id="room-panel">
+                <div class="panel" id="room-info"></div>
+                <div class="room-actions">
+                    <button class="panel" id="room-invite" type="button">Invite friends</button>
+                    <button class="panel" id="room-leave" type="button">Leave</button>
+                </div>
+            </div>
+            <div class="panel" id="now-playing"></div>
+            <div class="panel hidden" id="voting">
+                <div class="voting-header">
+                    <span>Vote for the next song</span>
+                    <span id="voting-timer"></span>
+                </div>
+                <ul id="voting-songs"></ul>
+            </div>
+            <div class="panel hidden" id="video-panel">
+                <div id="video-frame">
+                    <div id="youtube-player"></div>
+                </div>
+                <div id="video-controls">
+                    <button id="video-mute" title="Mute / unmute" type="button">🔇</button>
+                    <input id="video-volume" max="100" min="0" step="1" title="Volume" type="range" value="50">
+                </div>
+            </div>
+            <div class="panel" id="chat">
+                <ul id="chat-messages"></ul>
+                <form id="chat-form">
+                    <input autocomplete="off" id="chat-input" maxlength="240" placeholder="Say something...">
+                    <button type="submit">Send</button>
+                </form>
+            </div>
+            <div class="panel" id="emote-bar"></div>
+            <div class="panel" id="camera-view">
+                <div class="camera-view-row">
+                    <button id="camera-prev" title="Previous view" type="button">&#8249;</button>
+                    <span id="camera-view-name"></span>
+                    <button id="camera-next" title="Next view" type="button">&#8250;</button>
+                </div>
+                <label class="camera-slider">FOV<input id="camera-fov" max="100" min="20" step="1" type="range"></label>
+                <label class="camera-slider">Zoom<input id="camera-zoom" max="4" min="1" step="0.1"
+                                                        type="range"></label>
+            </div>
+        </div>
+    </div>
+
+    <script src="./src/main.js" type="module"></script>
 </body>
 </html>
