@@ -18,6 +18,9 @@ export default defineConfig({
     build: {
         outDir: './dist',
         emptyOutDir: true,
-        sourcemap: true
+        // Source maps would let anyone reconstruct the original source in
+        // devtools — keep them off for deploys (flip on locally to debug a
+        // production build)
+        sourcemap: false
     },
 })
