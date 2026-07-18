@@ -81,7 +81,7 @@ export default class Camera {
         this.params = {
             fov: 35,
             near: 0.1,
-            far: 150,
+            far: 400,
             zoom: 1.5,
             lerpFactor: 0.08,
             isOrbit: false,

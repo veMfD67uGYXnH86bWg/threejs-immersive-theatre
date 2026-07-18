@@ -15,4 +15,5 @@ export default [
     {id: 'heart', name: 'Heart', icon: '💜', key: '3'},
     {id: 'cheer', name: 'Cheer', icon: '🎉', key: '4', sound: 'sounds/cheers.ogg', cooldown: 10000},
     {id: 'lightstick', name: 'Lightstick', icon: '🪩', key: '5', toggle: true},
+    {id: 'crowdwave', name: 'Crowd wave', icon: '🌊', key: '6', cooldown: 20000},
 ]

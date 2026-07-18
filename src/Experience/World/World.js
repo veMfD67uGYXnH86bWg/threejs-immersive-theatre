@@ -3,6 +3,8 @@ import Experience from '../Experience.js'
 import Environment from './Environment.js'
 import Terrain from './Terrain.js'
 import Stage from './Stage.js'
+import Stadium from './Stadium.js'
+import Crowd from './Crowd.js'
 import TheatreSeats from './TheatreSeats.js'
 import PlayerManager from './PlayerManager.js'
 import ChatBubbles from './ChatBubbles.js'
@@ -18,6 +20,8 @@ export default class World {
             this.environment = new Environment()
             this.terrain = new Terrain()
             this.stage = new Stage()
+            this.stadium = new Stadium()
+            this.crowd = new Crowd()
             this.dancer = new Dancer()
             this.theatreSeats = new TheatreSeats()
             this.playerManager = new PlayerManager()
@@ -37,6 +41,9 @@ export default class World {
 
         if (this.chatBubbles)
             this.chatBubbles.update()
+
+        if (this.crowd)
+            this.crowd.update()
 
         if (this.dancer)
             this.dancer.update()

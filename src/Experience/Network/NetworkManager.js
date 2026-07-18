@@ -58,8 +58,8 @@ export default class NetworkManager extends EventEmitter {
             this.trigger('chatBlocked', [payload ?? {}])
         })
 
-        this.socket.on('emote:play', ({id, emoteId}) => {
-            this.trigger('emotePlayed', [{id, emoteId}])
+        this.socket.on('emote:play', ({id, emoteId, at}) => {
+            this.trigger('emotePlayed', [{id, emoteId, at}])
         })
 
         this.socket.on('player:lightstick', ({id, active}) => {

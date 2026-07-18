@@ -220,7 +220,9 @@ io.on('connection', (socket) => {
             player.emoteCooldowns[emoteId] = now
         }
 
-        io.to(room.code).emit('emote:play', {id: player.id, emoteId})
+        // `at` lets clients drive clock-synced effects (e.g. the crowd wave)
+        // from the same instant regardless of network jitter
+        io.to(room.code).emit('emote:play', {id: player.id, emoteId, at: Date.now()})
     })
 
     socket.on('vote:cast', ({songId} = {}) => {
