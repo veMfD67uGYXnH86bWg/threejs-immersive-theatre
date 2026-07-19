@@ -1,8 +1,35 @@
 import * as THREE from 'three/webgpu'
-import {abs, attribute, clamp, color, exp, float, hash, hue, instanceIndex, max, mix, PI, positionLocal, saturation, select, sin, step, TWO_PI, uniform, uniformArray, varying, vec3} from 'three/tsl'
+import {
+    abs,
+    attribute,
+    clamp,
+    color,
+    cos,
+    exp,
+    float,
+    hash,
+    hue,
+    instanceIndex,
+    max,
+    mix,
+    PI,
+    positionLocal,
+    saturation,
+    select,
+    sin,
+    step,
+    texture,
+    TWO_PI,
+    uniform,
+    uniformArray,
+    varying,
+    vec2,
+    vec3
+} from 'three/tsl'
 import Experience from '../Experience.js'
 import songs from '../../../shared/songs.js'
 import {STANDS, STAND_ROWS, STEP_HEIGHT, STEP_DEPTH} from './Stadium.js'
+import {buildCrowdSlots} from './StadiumBowl.js'
 
 const PERSON_SPACING = 0.95
 const IDLE_TEMPO = 90
@@ -12,11 +39,28 @@ const WAVE_WIDTH = 6
 // slower and wider — otherwise the tint crosses the stands in a ~1.5s blink
 const COLOR_WAVE_SPEED_FACTOR = 0.5
 const COLOR_WAVE_WIDTH_FACTOR = 1.8
-const WAVE_LIFT = 0.9
+const WAVE_LIFT = 1.15
 const WAVE_DURATION = 6 // s, enough for the front to cross the whole venue
-const SWEEP_SPEED = (Math.PI * 2) / 2.8 // rad/s — negate to flip direction
-const SWEEP_WIDTH = 0.55 // radians
+// One full lap over the wave's lifetime: the front returns to its start
+// angle exactly as the fade-out completes. Negative = clockwise (seen from
+// above); negate to flip direction.
+const SWEEP_SPEED = -(Math.PI * 2) / WAVE_DURATION
+const SWEEP_WIDTH = 0.40 // radians
+// Where the sweep front is born: π = behind the stage (no stands there), so
+// it enters the venue from the edge instead of popping mid-crowd
+const SWEEP_START_ANGLE = Math.PI
 const STAGE_CENTER = {x: 0, z: -7}
+
+// Hand position in the stick's pre-instance space (capsule 0.05/0.35
+// translated to (0.3, 1.25, 0) -> base sits at y = 1.25 - 0.225). Baked per
+// instance as a world-space attribute so stick scaling anchors correctly —
+// positionLocal is already instance-transformed in the node pipeline.
+const STICK_ANCHOR = {x: 0.3, y: 1.025, z: 0}
+
+// Sway is a rotation about the "elbow": a pivot this far below the hand
+// anchor, swinging ±SWAY_ANGLE (so 60° total by default)
+const ELBOW_OFFSET = 0.25
+const SWAY_ANGLE = Math.PI / 6
 
 // Three independent axes: motion pattern (radial/sweep) x move x tint.
 // The emote picks deterministically from the server timestamp
@@ -42,8 +86,20 @@ const MAX_PALETTE = 12
 // The sequence comes from the playing song's `colors` (shared/songs.js);
 // without one, it's derived from this fallback color as
 // [color +30 lightness, color, color +30 lightness].
-const WAVE_COLOR_FALLBACK = '#ffd166'
+const WAVE_COLOR_FALLBACK = '#00a24c'
 const MAX_WAVE_COLORS = 8
+
+// Built-in "card stunt" test image: a pixel heart shown until a real image
+// is loaded ('.' = transparent, anything else = filled)
+const DEFAULT_IMAGE = [
+    '.##.##.',
+    '#######',
+    '#######',
+    '.#####.',
+    '..###..',
+    '...#...',
+]
+const DEFAULT_IMAGE_COLOR = '#ff2d95'
 
 /**
  * The fake audience filling the stadium stands: two InstancedMeshes (bodies
@@ -71,6 +127,13 @@ export default class Crowd {
         this.uWaveInterval = uniform(1.2) // seconds between wave copies
         this.uWaveLoop = uniform(0) // 1 = endless train: a new front every interval
         this.uWaveJitter = uniform(0.2) // s of per-person reaction spread — humans aren't synced
+        this.uWaveLift = uniform(WAVE_LIFT) // how high sticks rise at the wave's peak
+        this.uSweepStart = uniform(SWEEP_START_ANGLE) // radians, where sweep fronts are born
+        this.uSweepWidth = uniform(SWEEP_WIDTH) // radians, angular thickness of the sweep front
+        this.uStickLength = uniform(1.65) // Y-scale multiplier of the lightstick
+        this.uStickWidth = uniform(1.65) // X/Z-scale multiplier of the lightstick
+        this.uSwaySpread = uniform(0.9) // radians of per-person phase offset
+        this.uStickTilt = uniform(Math.PI / 18) // ± fixed per-person off-plane tilt
         this.waveStartedAt = null
 
         // Lightstick look, tweakable at runtime (see setDebug); variations
@@ -90,7 +153,17 @@ export default class Crowd {
         this.uPalette = uniformArray(Array.from({length: MAX_PALETTE}, () => new THREE.Color('#ffffff')))
         this.uPaletteCount = uniform(0)
 
-        this.slots = this.buildSlots()
+        // Crowd display ("card stunt"): sticks adopt the color of "their"
+        // pixel, one lightstick per pixel, image centered per stand
+        this.uImageMix = uniform(0) // 0 = off, 1 = image fully shown
+        this.uImageSolo = uniform(0) // 1 = raw pixel colors, waves/beat bypassed
+        this.uImageSize = uniform(new THREE.Vector2(1, 1))
+        this.imageTexture = this.createDefaultImageTexture()
+        this.customImageLoaded = false
+
+        // Mitered bowl layout; use this.buildSlots() instead to go back to
+        // the rectangular Stadium.js layout
+        this.slots = buildCrowdSlots()
         this.setBodies()
         this.setLightsticks()
         this.setNetworkEvents()
@@ -109,17 +182,29 @@ export default class Crowd {
         })
 
         this.debugParams = {
-            waveType: 0,
+            waveType: 5,
             loopWave: false,
             lightstickColor: '#ff2d95',
             waveColor: WAVE_COLOR_FALLBACK,
+            crowdJitter: 1,
         }
+
+        // Placement scatter: 1 = full natural jitter, 0 = a perfect grid
+        // (sharpest image display, one stick per pixel)
+        this.debugFolder.addBinding(this.debugParams, 'crowdJitter', {
+            label: 'Placement scatter',
+            min: 0,
+            max: 1,
+            step: 0.01,
+        }).on('change', (event) => {
+            this.setJitter(event.value)
+        })
 
         this.debugFolder.addBlade({
             view: 'list',
             label: 'Wave type',
             options: WAVE_TYPES.map((type, index) => ({text: type.name, value: index})),
-            value: 0,
+            value: 5,
         }).on('change', (event) => {
             this.debugParams.waveType = event.value
 
@@ -165,6 +250,101 @@ export default class Crowd {
             step: 0.01,
         })
 
+        this.debugFolder.addBinding(this.uWaveLift, 'value', {
+            label: 'Wave height',
+            min: 0,
+            max: 2.5,
+            step: 0.05,
+        })
+
+        this.debugFolder.addBinding(this.uStickLength, 'value', {
+            label: 'Stick length',
+            min: 0.3,
+            max: 3,
+            step: 0.05,
+        })
+
+        this.debugFolder.addBinding(this.uStickWidth, 'value', {
+            label: 'Stick width',
+            min: 0.3,
+            max: 3,
+            step: 0.05,
+        })
+
+        this.debugFolder.addBinding(this.uSwaySpread, 'value', {
+            label: 'Sway spread',
+            min: 0,
+            max: Math.PI,
+            step: 0.01,
+        })
+
+        // Shown in degrees, stored in radians
+        this.debugParams.stickTiltDeg = 10
+        this.debugFolder.addBinding(this.debugParams, 'stickTiltDeg', {
+            label: 'Stick tilt (°)',
+            min: 0,
+            max: 25,
+            step: 0.5,
+        }).on('change', (event) => {
+            this.uStickTilt.value = event.value * (Math.PI / 180)
+        })
+
+        // Shown in degrees, stored in radians
+        this.debugParams.sweepStartDeg = SWEEP_START_ANGLE * (180 / Math.PI)
+        this.debugFolder.addBinding(this.debugParams, 'sweepStartDeg', {
+            label: 'Sweep start (°)',
+            min: 0,
+            max: 360,
+            step: 1,
+        }).on('change', (event) => {
+            this.uSweepStart.value = event.value * (Math.PI / 180)
+        })
+
+        this.debugParams.sweepWidthDeg = SWEEP_WIDTH * (180 / Math.PI)
+        this.debugFolder.addBinding(this.debugParams, 'sweepWidthDeg', {
+            label: 'Sweep width (°)',
+            min: 5,
+            max: 90,
+            step: 0.5,
+        }).on('change', (event) => {
+            this.uSweepWidth.value = event.value * (Math.PI / 180)
+        })
+
+        this.debugFolder.addBinding(this.uImageMix, 'value', {
+            label: 'Image blend',
+            min: 0,
+            max: 1,
+            step: 0.01,
+        })
+
+        // Path under public/, e.g. textures/aespa/karina1.png — empty =
+        // built-in heart
+        this.debugParams.imageUrl = ''
+        this.debugFolder.addBinding(this.debugParams, 'imageUrl', {
+            label: 'Image URL',
+        }).on('change', (event) => {
+            const url = event.value.trim()
+
+            if (url)
+                this.loadImage(url)
+        })
+
+        // Solo mode: the image IS the lightsticks, waves/beat bypassed.
+        // First activation auto-loads an aespa picture if the built-in
+        // heart is still up.
+        const imageButton = this.debugFolder.addButton({title: 'Image sticks: off'})
+        imageButton.on('click', () => {
+            const active = this.uImageSolo.value !== 1
+            this.uImageSolo.value = active ? 1 : 0
+            imageButton.title = active ? 'Image sticks: ON' : 'Image sticks: off'
+
+            if (active && !this.customImageLoaded) {
+                this.debugParams.imageUrl = 'textures/aespa/aespa1.png'
+                this.loadImage(this.debugParams.imageUrl)
+                this.debug.ui.refresh()
+            }
+        })
+
         this.debugFolder.addBinding(this.debugParams, 'lightstickColor', {
             label: 'Stick color',
         }).on('change', (event) => {
@@ -201,8 +381,9 @@ export default class Crowd {
         })
     }
 
-    // One slot per fake person on the stand steps. Deterministic jitter so
-    // every client builds the identical crowd.
+    // LEGACY rectangular layout — pairs with Stadium.js. Kept so the old
+    // stadium remains one import swap away; StadiumBowl.buildCrowdSlots()
+    // is the active generator.
     buildSlots() {
         const slots = []
 
@@ -234,6 +415,10 @@ export default class Crowd {
                         scale: 0.85 + random() * 0.25,
                         distance: Math.hypot(x - STAGE_CENTER.x, z - STAGE_CENTER.z),
                         angle: Math.atan2(x - STAGE_CENTER.x, z - STAGE_CENTER.z),
+                        // Grid coords centered on the stand — the crowd
+                        // display maps one person to one image pixel
+                        col: i - (perRow - 1) / 2,
+                        row: row - (STAND_ROWS - 1) / 2,
                     })
                 }
             }
@@ -257,19 +442,105 @@ export default class Crowd {
         mesh.frustumCulled = false
     }
 
-    // Baked distance and azimuth to the stage per instance — what the
-    // radial and sweep wave fronts are measured against
+    // Packed per-instance data. WebGPU allows only 8 vertex buffers per
+    // pipeline and every attribute costs one, so scalars are bundled:
+    //   crowdWave:   vec4(distance to stage, azimuth, sway mode, unused)
+    //   crowdGrid:   vec2(col, row) for the image display
+    //   crowdAnchor: vec3 world-space hand position (stick scale/pivot)
     setInstanceAttributes(geometry) {
-        const distances = new Float32Array(this.slots.length)
-        const angles = new Float32Array(this.slots.length)
+        const wave = new Float32Array(this.slots.length * 4)
+        const grid = new Float32Array(this.slots.length * 2)
+        const anchors = new Float32Array(this.slots.length * 3)
 
         this.slots.forEach((slot, index) => {
-            distances[index] = slot.distance
-            angles[index] = slot.angle
+            wave[index * 4] = slot.distance
+            wave[index * 4 + 1] = slot.angle
+            wave[index * 4 + 2] = slot.swayMode ?? 0
+
+            grid[index * 2] = slot.col
+            grid[index * 2 + 1] = slot.row
+
+            this.writeAnchor(anchors, index)
         })
 
-        geometry.setAttribute('crowdDistance', new THREE.InstancedBufferAttribute(distances, 1))
-        geometry.setAttribute('crowdAngle', new THREE.InstancedBufferAttribute(angles, 1))
+        geometry.setAttribute('crowdWave', new THREE.InstancedBufferAttribute(wave, 4))
+        geometry.setAttribute('crowdGrid', new THREE.InstancedBufferAttribute(grid, 2))
+        this.anchorAttribute = new THREE.InstancedBufferAttribute(anchors, 3)
+        geometry.setAttribute('crowdAnchor', this.anchorAttribute)
+    }
+
+    // World-space hand position: the stick anchor pushed through this
+    // instance's rotation, scale and (possibly re-jittered) position
+    writeAnchor(anchors, index) {
+        const slot = this.slots[index]
+        const cos = Math.cos(slot.facing)
+        const sin = Math.sin(slot.facing)
+        const ax = STICK_ANCHOR.x * slot.scale
+        anchors[index * 3] = slot.position.x + cos * ax
+        anchors[index * 3 + 1] = slot.position.y + STICK_ANCHOR.y * slot.scale
+        anchors[index * 3 + 2] = slot.position.z - sin * ax
+    }
+
+    // Re-scale the per-person placement jitter live (1 = full scatter as
+    // built, 0 = a perfect grid). Rewrites body matrices and stick anchors.
+    setJitter(scale) {
+        this.slots.forEach((slot) => {
+            if (!slot.positionBase || !slot.jitterVec)
+                return
+            slot.position.copy(slot.positionBase).addScaledVector(slot.jitterVec, scale)
+        })
+
+        if (this.bodies)
+            this.fillInstances(this.bodies)
+
+        if (this.anchorAttribute) {
+            const anchors = this.anchorAttribute.array
+            for (let index = 0; index < this.slots.length; index++)
+                this.writeAnchor(anchors, index)
+            this.anchorAttribute.needsUpdate = true
+        }
+    }
+
+    // Tiny CanvasTexture of the built-in pixel heart, nearest-filtered so
+    // one person = one crisp pixel
+    createDefaultImageTexture() {
+        const canvas = document.createElement('canvas')
+        canvas.width = DEFAULT_IMAGE[0].length
+        canvas.height = DEFAULT_IMAGE.length
+
+        const context = canvas.getContext('2d')
+        context.fillStyle = DEFAULT_IMAGE_COLOR
+
+        DEFAULT_IMAGE.forEach((rowPixels, y) => {
+            for (let x = 0; x < rowPixels.length; x++) {
+                if (rowPixels[x] !== '.')
+                    context.fillRect(x, y, 1, 1)
+            }
+        })
+
+        const canvasTexture = new THREE.CanvasTexture(canvas)
+        this.configureImageTexture(canvasTexture)
+        this.uImageSize.value.set(canvas.width, canvas.height)
+
+        return canvasTexture
+    }
+
+    configureImageTexture(imageTexture) {
+        imageTexture.magFilter = THREE.NearestFilter
+        imageTexture.minFilter = THREE.NearestFilter
+        imageTexture.generateMipmaps = false
+        imageTexture.colorSpace = THREE.SRGBColorSpace
+    }
+
+    loadImage(url) {
+        new THREE.TextureLoader().load(url, (loaded) => {
+            this.configureImageTexture(loaded)
+            this.uImageSize.value.set(loaded.image.width, loaded.image.height)
+            this.imageTextureNode.value = loaded
+            this.customImageLoaded = true
+        }, undefined, () => {
+            console.warn(`Crowd image failed to load: ${url}`)
+        })
     }
 
     // Gaussian pulse around the travelling wave front(s), 0 while inactive.
@@ -280,8 +551,9 @@ export default class Crowd {
     // Returns the pulse split into its two uses: `move` (lift/hop — zero for
     // color-only waves) and `glow` (brightness/tint — all wave types).
     wavePulse() {
-        const dist = attribute('crowdDistance', 'float')
-        const angle = attribute('crowdAngle', 'float')
+        const waveData = attribute('crowdWave', 'vec4')
+        const dist = waveData.x
+        const angle = waveData.y
         const isSweep = this.uWavePattern.equal(1)
 
         // exp(-x²) — squared via self-multiplication because WGSL pow() is
@@ -318,10 +590,10 @@ export default class Crowd {
             const radial = bell(radialFront.div(radialWidth))
 
             // Sweep: front circles the venue; wrap the angle diff to [-π, π]
-            const sweepAngle = copyTime.mul(SWEEP_SPEED)
+            const sweepAngle = copyTime.mul(SWEEP_SPEED).add(this.uSweepStart)
             const angleDelta = angle.sub(sweepAngle).add(PI).mod(TWO_PI).sub(PI)
             const sweepFade = clamp(copyTime, 0, 1).mul(clamp(float(WAVE_DURATION).sub(copyTime), 0, 1))
-            const sweep = bell(angleDelta.div(SWEEP_WIDTH)).mul(sweepFade)
+            const sweep = bell(angleDelta.div(this.uSweepWidth)).mul(sweepFade)
 
             sum = sum.add(select(isSweep, sweep, radial).mul(started).mul(exists))
         }
@@ -345,7 +617,8 @@ export default class Crowd {
 
         const jitter = hash(instanceIndex).mul(Math.PI * 2)
         const bob = abs(sin(this.uSwayPhase.mul(0.5).add(jitter))).mul(0.05)
-        const hop = this.wavePulse().move.mul(0.18)
+        // Bodies hop at a fixed fraction of the stick lift
+        const hop = this.wavePulse().move.mul(this.uWaveLift).mul(0.2)
         material.positionNode = positionLocal.add(vec3(0, bob.add(hop), 0))
 
         this.bodies = new THREE.InstancedMesh(geometry, material, this.slots.length)
@@ -383,6 +656,28 @@ export default class Crowd {
 
         const base = select(this.uPaletteCount.greaterThan(0), member, fallback)
 
+        // Crowd display: each person samples "their" pixel (grid coords are
+        // instanced attributes, so they cross to the fragment stage as a
+        // varying). Out-of-image or transparent pixels keep the normal look.
+        const grid = varying(attribute('crowdGrid', 'vec2'))
+
+        // col grows along the stand's local +X, which reads right-to-left
+        // from the stage's viewpoint — negate X so the image isn't mirrored.
+        // The continuous pixel coordinate is snapped to an explicit texel
+        // center with a quarter-texel bias: row counts alternate odd/even,
+        // which would otherwise park some rows exactly on texel edges where
+        // nearest-filtering flickers between the two neighboring pixels.
+        const pixel = vec2(grid.x.negate(), grid.y).add(this.uImageSize.mul(0.5))
+        const texel = pixel.add(0.25).floor()
+        const imageUv = texel.add(0.5).div(this.uImageSize)
+        const imageSample = texture(this.imageTexture, imageUv)
+        this.imageTextureNode = imageSample
+
+        const inBounds = step(0, texel.x).mul(step(texel.x, this.uImageSize.x.sub(1)))
+            .mul(step(0, texel.y)).mul(step(texel.y, this.uImageSize.y.sub(1)))
+        const imageAmount = this.uImageMix.mul(inBounds).mul(step(0.5, imageSample.a))
+        const displayBase = mix(base, imageSample.rgb, imageAmount)
+
         const {move, glow} = this.wavePulse()
 
         // Same math as the position waves, different output: the pulse is
@@ -405,12 +700,73 @@ export default class Crowd {
             gradientPos.fract(),
         )
 
-        const tinted = mix(base, waveColor, waveGlow.mul(this.uWaveTint).min(1))
+        const tinted = mix(displayBase, waveColor, waveGlow.mul(this.uWaveTint).min(1))
         const beatPulse = max(sin(this.uSwayPhase.mul(2)), 0).pow(4).mul(0.25)
-        material.colorNode = tinted.mul(waveGlow.mul(2.0).add(beatPulse).add(0.9))
+        const animated = tinted.mul(waveGlow.mul(2.0).add(beatPulse).add(0.9))
 
-        const sway = sin(this.uSwayPhase.add(hash(instanceIndex).mul(0.9))).mul(0.16)
-        material.positionNode = positionLocal.add(vec3(sway, move.mul(WAVE_LIFT), 0))
+        // "Image sticks" solo mode: in-image sticks show their pixel color
+        // verbatim — no wave tint, no glow, no beat pulse. Sticks outside
+        // the image (or on transparent pixels) keep the normal behavior.
+        const soloAmount = this.uImageSolo.mul(inBounds).mul(step(0.5, imageSample.a))
+        material.colorNode = mix(animated, imageSample.rgb, soloAmount)
+
+        // Stick size: scale around this instance's own hand position (baked
+        // world-space attribute) so length grows upward and width thickens
+        // in place, at every row height
+        const stickAnchor = attribute('crowdAnchor', 'vec3')
+        const stickScale = vec3(this.uStickWidth, this.uStickLength, this.uStickWidth)
+        const scaled = positionLocal.sub(stickAnchor).mul(stickScale).add(stickAnchor)
+
+        // Sway as a rotation about the elbow pivot (just below the hand).
+        // Side stands rotate about world Z (tip swings side to side), the
+        // back stand about world X (front to back) — see StadiumBowl STANDS
+        // Sway mode from the packed attribute: even = side to side, odd =
+        // front to back; modes >= 2 swing mirrored (negated = half-period
+        // delay). See StadiumBowl STANDS.
+        const swayMode = attribute('crowdWave', 'vec4').z
+        const swaySign = float(1).sub(step(1.5, swayMode).mul(2))
+
+        const frontBack = swayMode.mod(2)
+
+        const rotateAboutZ = (v, s, c) => vec3(
+            v.x.mul(c).sub(v.y.mul(s)),
+            v.x.mul(s).add(v.y.mul(c)),
+            v.z,
+        )
+        const rotateAboutX = (v, s, c) => vec3(
+            v.x,
+            v.y.mul(c).sub(v.z.mul(s)),
+            v.y.mul(s).add(v.z.mul(c)),
+        )
+
+        // The beat sway, staggered per person by uSwaySpread
+        const pivot = stickAnchor.sub(vec3(0, ELBOW_OFFSET, 0))
+        const swayPhase = this.uSwayPhase.add(hash(instanceIndex).mul(this.uSwaySpread))
+        const angle = sin(swayPhase).mul(SWAY_ANGLE).mul(swaySign)
+        const angleSin = sin(angle)
+        const angleCos = cos(angle)
+        const offset = scaled.sub(pivot)
+
+        const swayRotated = mix(
+            rotateAboutZ(offset, angleSin, angleCos),
+            rotateAboutX(offset, angleSin, angleCos),
+            frontBack,
+        )
+
+        // Fixed per-person tilt about the axis orthogonal to the sway plane
+        // (±uStickTilt), so sticks aren't militarily parallel mid-swing
+        const tiltAngle = hash(instanceIndex.add(53)).sub(0.5).mul(2).mul(this.uStickTilt)
+        const tiltSin = sin(tiltAngle)
+        const tiltCos = cos(tiltAngle)
+        const tilted = mix(
+            rotateAboutX(swayRotated, tiltSin, tiltCos),
+            rotateAboutZ(swayRotated, tiltSin, tiltCos),
+            frontBack,
+        )
+
+        const rotated = pivot.add(tilted)
+
+        material.positionNode = rotated.add(vec3(0, move.mul(this.uWaveLift), 0))
 
         this.lightsticks = new THREE.InstancedMesh(geometry, material, this.slots.length)
         this.fillInstances(this.lightsticks)
