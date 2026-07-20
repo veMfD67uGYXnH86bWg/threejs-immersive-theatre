@@ -30,6 +30,7 @@ import Experience from '../Experience.js'
 import songs from '../../../shared/songs.js'
 import {STANDS, STAND_ROWS, STEP_HEIGHT, STEP_DEPTH} from './Stadium.js'
 import {buildCrowdSlots} from './StadiumBowl.js'
+import CrowdChoreographer from './CrowdChoreographer.js'
 
 const PERSON_SPACING = 0.95
 const IDLE_TEMPO = 90
@@ -50,6 +51,9 @@ const SWEEP_WIDTH = 0.40 // radians
 // it enters the venue from the edge instead of popping mid-crowd
 const SWEEP_START_ANGLE = Math.PI
 const STAGE_CENTER = {x: 0, z: -7}
+// Seconds to crossfade the crowd between the idle stick colors and a
+// playing song's member palette
+const PALETTE_FADE = 2.5
 
 // Hand position in the stick's pre-instance space (capsule 0.05/0.35
 // translated to (0.3, 1.25, 0) -> base sits at y = 1.25 - 0.225). Baked per
@@ -73,11 +77,29 @@ const WAVE_TYPES = [
     {name: 'Sweep color', pattern: 1, move: false, tint: true},
     {name: 'Radial combo', pattern: 0, move: true, tint: true},
     {name: 'Sweep combo', pattern: 1, move: true, tint: true},
+    // Card-stunt sweep: the venue blacks out and the loaded image rides the
+    // sweep front around the stands. Needs an image, so it's excluded from
+    // the random emote pick — trigger via startImageWave() or the debug panel
+    {name: 'Image sweep', pattern: 1, move: false, tint: false, image: true},
 ]
 
+// The emote's deterministic pick only draws from the imageless types
+const RANDOM_WAVE_COUNT = WAVE_TYPES.filter((type) => !type.image).length
+
 // The shader loops over this many potential wave copies (repeats), each
-// offset by the wave interval — overlapping fronts sum together
-const MAX_REPEATS = 8
+// offset by the wave interval — overlapping fronts sum together. This also
+// caps the simultaneous fronts: a looping sweep needs lapTime/interval of
+// them alive to circle without gaps (e.g. a 9s lap at 0.4s spacing = ~23),
+// so keep it generous. Unrolled at material-build time; the pulse is a
+// cheap vertex-stage computation, so a high count is affordable.
+const MAX_REPEATS = 32
+
+// The image sweep can carry this many simultaneous fronts, evenly spaced
+// around the venue, each with its own image from the set. Unrolled at
+// material-build time — one texture sample AND one texture binding per
+// copy, so this eats into WebGPU's per-stage sampled-texture budget (16 by
+// default; the static display uses one more).
+const MAX_IMAGE_COPIES = 8
 
 // Uniform arrays are fixed-size: room for this many member colors per song
 const MAX_PALETTE = 12
@@ -100,6 +122,11 @@ const DEFAULT_IMAGE = [
     '...#...',
 ]
 const DEFAULT_IMAGE_COLOR = '#ff2d95'
+
+// The image sweep's default pictures — Resources item names (sources.js);
+// arbitrary paths under public/ also work as a fallback. Replace via
+// startImageWave(at, [names]) or loadImageSet()
+const DEFAULT_IMAGE_SET = ['aespa1', 'karina2']
 
 /**
  * The fake audience filling the stadium stands: two InstancedMeshes (bodies
@@ -128,6 +155,11 @@ export default class Crowd {
         this.uWaveLoop = uniform(0) // 1 = endless train: a new front every interval
         this.uWaveJitter = uniform(0.2) // s of per-person reaction spread — humans aren't synced
         this.uWaveLift = uniform(WAVE_LIFT) // how high sticks rise at the wave's peak
+        this.uWaveAmp = uniform(1) // master wave intensity — choreography eases cues in/out with it
+        this.uWaveSpeed = uniform(WAVE_SPEED) // units/s, radial front speed (choreography can drive it)
+        this.uWaveWidth = uniform(WAVE_WIDTH) // units, radial front thickness
+        this.uWaveColorMode = uniform(0) // 0 = glow-gradient through the colors, 1 = one
+        this.uSweepSpeed = uniform(SWEEP_SPEED) // rad/s of regular sweeps (negative = clockwise)
         this.uSweepStart = uniform(SWEEP_START_ANGLE) // radians, where sweep fronts are born
         this.uSweepWidth = uniform(SWEEP_WIDTH) // radians, angular thickness of the sweep front
         this.uStickLength = uniform(1.65) // Y-scale multiplier of the lightstick
@@ -152,22 +184,44 @@ export default class Crowd {
         // (uPaletteCount 0 = no palette -> fallback HSL coloring)
         this.uPalette = uniformArray(Array.from({length: MAX_PALETTE}, () => new THREE.Color('#ffffff')))
         this.uPaletteCount = uniform(0)
+        // Fallback -> member-palette crossfade: eased toward paletteMixTarget
+        // every frame, so song start/end recolors the crowd gradually
+        this.uPaletteMix = uniform(0)
+        this.paletteMixTarget = 0
+        this.paletteFade = PALETTE_FADE // s, tweakable in the debug panel
 
         // Crowd display ("card stunt"): sticks adopt the color of "their"
         // pixel, one lightstick per pixel, image centered per stand
         this.uImageMix = uniform(0) // 0 = off, 1 = image fully shown
         this.uImageSolo = uniform(0) // 1 = raw pixel colors, waves/beat bypassed
+        this.uImageCenterOnly = uniform(0) // 1 = static display only on the center (back) stand
+        this.uImageBlackout = uniform(0) // 1 = sticks not showing an image pixel go black
+        this.uImageFlash = uniform(1) // flicker brightness: dims the solo image toward black
+        this.uImageWrap = uniform(0) // 1 = one image wrapped around the bowl instead of per-stand copies
+        this.uImageWaveBlackout = uniform(1) // image sweep: 1 = venue blacks out, 0 = crowd stays lit
+        this.uImageWave = uniform(0) // 1 = blackout + the image rides the sweep front
+        this.uImageSweepSpeed = uniform(SWEEP_SPEED) // rad/s of the image sweep (negative = clockwise)
+        this.uImageLapTime = uniform(WAVE_DURATION) // s per image lap; kept in sync with the speed
+        this.uImageCopies = uniform(1) // 1..MAX_IMAGE_COPIES simultaneous image fronts
+        // Per-copy image dimensions (the set's images may differ in size)
+        this.uImageSizes = uniformArray(Array.from({length: MAX_IMAGE_COPIES}, () => new THREE.Vector2(1, 1)))
         this.uImageSize = uniform(new THREE.Vector2(1, 1))
         this.imageTexture = this.createDefaultImageTexture()
         this.customImageLoaded = false
 
         // Mitered bowl layout; use this.buildSlots() instead to go back to
         // the rectangular Stadium.js layout
+        this.resources = this.experience.resources
+
         this.slots = buildCrowdSlots()
         this.setBodies()
         this.setLightsticks()
         this.setNetworkEvents()
         this.setDebug()
+
+        // Snapshots the uniforms above as its release-state, so it comes
+        // after everything that sets defaults
+        this.choreographer = new CrowdChoreographer(this)
 
         console.log(`Crowd loaded (${this.slots.length} people)`)
     }
@@ -178,6 +232,19 @@ export default class Crowd {
 
         this.debugFolder = this.debug.ui.addFolder({
             title: 'Crowd',
+            expanded: true,
+        })
+
+        this.waveFolder = this.debugFolder.addFolder({
+            title: 'Wave',
+            expanded: true,
+        })
+        this.stickFolder = this.debugFolder.addFolder({
+            title: 'Lightsticks',
+            expanded: true,
+        })
+        this.imageFolder = this.debugFolder.addFolder({
+            title: 'Image',
             expanded: true,
         })
 
@@ -192,17 +259,18 @@ export default class Crowd {
         // Placement scatter: 1 = full natural jitter, 0 = a perfect grid
         // (sharpest image display, one stick per pixel)
         this.debugFolder.addBinding(this.debugParams, 'crowdJitter', {
-            label: 'Placement scatter',
+            label: 'Placement Offset',
             min: 0,
             max: 1,
             step: 0.01,
+            index: 0,
         }).on('change', (event) => {
             this.setJitter(event.value)
         })
 
-        this.debugFolder.addBlade({
+        this.waveFolder.addBlade({
             view: 'list',
-            label: 'Wave type',
+            label: 'Wave Type',
             options: WAVE_TYPES.map((type, index) => ({text: type.name, value: index})),
             value: 5,
         }).on('change', (event) => {
@@ -214,65 +282,112 @@ export default class Crowd {
         })
 
         // Local preview only — doesn't broadcast to the room
-        this.debugFolder.addButton({title: 'Trigger wave'}).on('click', () => {
+        this.waveFolder.addButton({title: 'Trigger wave'}).on('click', () => {
             this.startWave(this.network.serverClock.now(), this.debugParams.waveType)
         })
 
         // Endless wave train: a new front every interval until toggled off
-        const loopButton = this.debugFolder.addButton({title: 'Loop wave: off'})
+        const loopButton = this.waveFolder.addButton({title: 'Loop Wave: OFF'})
         loopButton.on('click', () => {
             this.debugParams.loopWave = !this.debugParams.loopWave
-            loopButton.title = this.debugParams.loopWave ? 'Loop wave: ON' : 'Loop wave: off'
+            loopButton.title = this.debugParams.loopWave ? 'Loop Wave: ON' : 'Loop wave: OFF'
             this.uWaveLoop.value = this.debugParams.loopWave ? 1 : 0
 
             if (this.debugParams.loopWave)
                 this.startWave(this.network.serverClock.now(), this.debugParams.waveType)
         })
 
-        this.debugFolder.addBinding(this.uWaveRepeats, 'value', {
-            label: 'Wave repeats',
+        this.waveFolder.addBinding(this.uWaveRepeats, 'value', {
+            label: 'Wave Repeats',
             min: 1,
             max: MAX_REPEATS,
             step: 1,
         })
 
-        this.debugFolder.addBinding(this.uWaveInterval, 'value', {
-            label: 'Wave interval (s)',
+        this.waveFolder.addBinding(this.uWaveInterval, 'value', {
+            // label: 'Wave Interval (s)',
+            label: 'Waves every X (s)',
             min: 0.2,
             max: 4,
             step: 0.05,
         })
 
-        this.debugFolder.addBinding(this.uWaveJitter, 'value', {
-            label: 'Reaction spread (s)',
+        this.waveFolder.addBinding(this.uWaveJitter, 'value', {
+            label: 'Reaction Offset (s)',
             min: 0,
             max: 0.5,
             step: 0.01,
         })
 
-        this.debugFolder.addBinding(this.uWaveLift, 'value', {
-            label: 'Wave height',
+        this.waveFolder.addBinding(this.uWaveLift, 'value', {
+            label: 'Wave Height',
             min: 0,
             max: 2.5,
             step: 0.05,
         })
 
-        this.debugFolder.addBinding(this.uStickLength, 'value', {
-            label: 'Stick length',
+        // Radial front speed; cue param `speed`. Fronts must satisfy
+        // speed * interval * MAX_REPEATS >= ~50 to cross the venue in loop
+        // mode
+        this.waveFolder.addBinding(this.uWaveSpeed, 'value', {
+            label: 'Radial Speed (u/s)',
+            min: 2,
+            max: 40,
+            step: 0.5,
+        })
+
+        // Radial front thickness; cue param `width` on radial waves
+        // (color-only waves render it 1.8x wider)
+        this.waveFolder.addBinding(this.uWaveWidth, 'value', {
+            label: 'Radial Width (u)',
+            min: 1,
+            max: 20,
+            step: 0.5,
+        })
+
+        // Wave color distribution; cue param `colorMode`
+        this.waveFolder.addBlade({
+            view: 'list',
+            label: 'Color Mode',
+            options: [
+                {text: 'Gradient (by intensity)', value: 0},
+                {text: 'Per wave', value: 1},
+            ],
+            value: 0,
+        }).on('change', (event) => {
+            this.uWaveColorMode.value = event.value
+        })
+
+        // Regular-sweep travel time; cue param `lapTime` (the image sweep
+        // has its own lap slider in the image folder)
+        // Seconds for a sweep front to travel a full turn around the venue
+        this.debugParams.sweepLapTime = WAVE_DURATION
+        this.waveFolder.addBinding(this.debugParams, 'sweepLapTime', {
+            label: 'Sweep Lap (s)',
+            min: 2,
+            max: 24,
+            step: 0.5,
+        }).on('change', (event) => {
+            // ±2π / lap-time; negative = clockwise, the default direction
+            this.uSweepSpeed.value = -(Math.PI * 2) / event.value
+        })
+
+        this.stickFolder.addBinding(this.uStickLength, 'value', {
+            label: 'Stick Length (Y)',
             min: 0.3,
             max: 3,
             step: 0.05,
         })
 
-        this.debugFolder.addBinding(this.uStickWidth, 'value', {
-            label: 'Stick width',
+        this.stickFolder.addBinding(this.uStickWidth, 'value', {
+            label: 'Stick Width (XZ)',
             min: 0.3,
             max: 3,
             step: 0.05,
         })
 
-        this.debugFolder.addBinding(this.uSwaySpread, 'value', {
-            label: 'Sway spread',
+        this.stickFolder.addBinding(this.uSwaySpread, 'value', {
+            label: 'Sway Offset Spread',
             min: 0,
             max: Math.PI,
             step: 0.01,
@@ -280,8 +395,8 @@ export default class Crowd {
 
         // Shown in degrees, stored in radians
         this.debugParams.stickTiltDeg = 10
-        this.debugFolder.addBinding(this.debugParams, 'stickTiltDeg', {
-            label: 'Stick tilt (°)',
+        this.stickFolder.addBinding(this.debugParams, 'stickTiltDeg', {
+            label: 'Y Rotation (tilt)',
             min: 0,
             max: 25,
             step: 0.5,
@@ -291,18 +406,18 @@ export default class Crowd {
 
         // Shown in degrees, stored in radians
         this.debugParams.sweepStartDeg = SWEEP_START_ANGLE * (180 / Math.PI)
-        this.debugFolder.addBinding(this.debugParams, 'sweepStartDeg', {
-            label: 'Sweep start (°)',
-            min: 0,
-            max: 360,
-            step: 1,
-        }).on('change', (event) => {
-            this.uSweepStart.value = event.value * (Math.PI / 180)
-        })
+        // this.waveFolder.addBinding(this.debugParams, 'sweepStartDeg', {
+        //     label: 'Sweep Start (°)',
+        //     min: 0,
+        //     max: 360,
+        //     step: 1,
+        // }).on('change', (event) => {
+        //     this.uSweepStart.value = event.value * (Math.PI / 180)
+        // })
 
         this.debugParams.sweepWidthDeg = SWEEP_WIDTH * (180 / Math.PI)
-        this.debugFolder.addBinding(this.debugParams, 'sweepWidthDeg', {
-            label: 'Sweep width (°)',
+        this.waveFolder.addBinding(this.debugParams, 'sweepWidthDeg', {
+            label: 'Sweep Width (°)',
             min: 5,
             max: 90,
             step: 0.5,
@@ -310,18 +425,42 @@ export default class Crowd {
             this.uSweepWidth.value = event.value * (Math.PI / 180)
         })
 
-        this.debugFolder.addBinding(this.uImageMix, 'value', {
-            label: 'Image blend',
+        // Image sweep speed as seconds per full lap; speed uniform derives
+        // from it (negative = clockwise)
+        this.debugParams.imageLapTime = WAVE_DURATION
+        this.imageFolder.addBinding(this.debugParams, 'imageLapTime', {
+            label: 'Image lap (s)',
+            min: 2,
+            max: 24,
+            step: 0.5,
+        }).on('change', (event) => {
+            this.uImageLapTime.value = event.value
+            this.uImageSweepSpeed.value = -(Math.PI * 2) / event.value
+        })
+
+        // Simultaneous image fronts, evenly spaced around the venue
+        this.debugParams.imageCopies = 1
+        this.imageFolder.addBinding(this.debugParams, 'imageCopies', {
+            label: 'Images per Wave',
+            min: 1,
+            max: MAX_IMAGE_COPIES,
+            step: 1,
+        }).on('change', (event) => {
+            this.uImageCopies.value = event.value
+        })
+
+        this.imageFolder.addBinding(this.uImageMix, 'value', {
+            label: 'Image Blend',
             min: 0,
             max: 1,
             step: 0.01,
         })
 
-        // Path under public/, e.g. textures/aespa/karina1.png — empty =
+        // Resource name (e.g. karina1) or path under public/ — empty =
         // built-in heart
         this.debugParams.imageUrl = ''
-        this.debugFolder.addBinding(this.debugParams, 'imageUrl', {
-            label: 'Image URL',
+        this.imageFolder.addBinding(this.debugParams, 'imageUrl', {
+            label: 'Image Name',
         }).on('change', (event) => {
             const url = event.value.trim()
 
@@ -332,49 +471,82 @@ export default class Crowd {
         // Solo mode: the image IS the lightsticks, waves/beat bypassed.
         // First activation auto-loads an aespa picture if the built-in
         // heart is still up.
-        const imageButton = this.debugFolder.addButton({title: 'Image sticks: off'})
+        const imageButton = this.imageFolder.addButton({title: 'Image sticks: OFF'})
         imageButton.on('click', () => {
             const active = this.uImageSolo.value !== 1
             this.uImageSolo.value = active ? 1 : 0
-            imageButton.title = active ? 'Image sticks: ON' : 'Image sticks: off'
+            imageButton.title = active ? 'Image sticks: ON' : 'Image sticks: OFF'
 
             if (active && !this.customImageLoaded) {
-                this.debugParams.imageUrl = 'textures/aespa/aespa1.png'
+                this.debugParams.imageUrl = DEFAULT_IMAGE_SET[0]
                 this.loadImage(this.debugParams.imageUrl)
                 this.debug.ui.refresh()
             }
         })
 
-        this.debugFolder.addBinding(this.debugParams, 'lightstickColor', {
-            label: 'Stick color',
+        this.stickFolder.addBinding(this.debugParams, 'lightstickColor', {
+            label: 'Stick Color',
+            index: 0,
         }).on('change', (event) => {
             this.uStickColor.value.set(event.value)
         })
 
         // Fallback wave color, used when the playing song has no `colors`
-        this.debugFolder.addBinding(this.debugParams, 'waveColor', {
-            label: 'Wave color',
+        this.waveFolder.addBinding(this.debugParams, 'waveColor', {
+            label: 'Wave Color',
         }).on('change', (event) => {
             this.waveColorFallback.set(event.value)
             this.syncWaveColors()
         })
 
-        this.debugFolder.addBinding(this.uHueVariation, 'value', {
-            label: 'Hue variation',
+        // Second color: the wave sequence becomes [color, color 2] — makes
+        // Color Mode differences visible without editing the timeline.
+        // Defaults to the lighter shade the single-color expansion used.
+        {
+            const hsl = {}
+            this.waveColorFallback.getHSL(hsl)
+            const lighter = new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + 0.3))
+            this.debugParams.waveColor2 = `#${lighter.getHexString()}`
+            this.waveColorFallback2 = lighter
+            this.syncWaveColors()
+        }
+
+        this.waveFolder.addBinding(this.debugParams, 'waveColor2', {
+            label: 'Wave Color 2',
+        }).on('change', (event) => {
+            this.waveColorFallback2.set(event.value)
+            this.syncWaveColors()
+        })
+
+        // Current panel values as a paste-ready choreography cue
+        this.waveFolder.addButton({title: 'Copy cue JSON'}).on('click', () => {
+            this.copyCueToClipboard()
+        })
+
+        // Idle colors <-> song member palette crossfade duration
+        this.stickFolder.addBinding(this, 'paletteFade', {
+            label: 'Palette fade (s)',
+            min: 0,
+            max: 10,
+            step: 0.1,
+        })
+
+        this.stickFolder.addBinding(this.uHueVariation, 'value', {
+            label: 'Hue Variation',
             min: 0,
             max: 1,
             step: 0.01,
         })
 
-        this.debugFolder.addBinding(this.uSatVariation, 'value', {
-            label: 'Sat variation',
+        this.stickFolder.addBinding(this.uSatVariation, 'value', {
+            label: 'Sat Variation',
             min: 0,
             max: 1,
             step: 0.01,
         })
 
-        this.debugFolder.addBinding(this.uLightVariation, 'value', {
-            label: 'Light variation',
+        this.stickFolder.addBinding(this.uLightVariation, 'value', {
+            label: 'Light Variation',
             min: 0,
             max: 1,
             step: 0.01,
@@ -530,16 +702,92 @@ export default class Crowd {
         imageTexture.minFilter = THREE.NearestFilter
         imageTexture.generateMipmaps = false
         imageTexture.colorSpace = THREE.SRGBColorSpace
+        // Resources items may already sit on the GPU with default filters
+        imageTexture.needsUpdate = true
     }
 
-    loadImage(url) {
-        new THREE.TextureLoader().load(url, (loaded) => {
+    // Resolve a crowd image: a preloaded Resources item by name (sources.js,
+    // e.g. 'aespa1') first, else a path under public/ loaded on the fly
+    resolveImage(nameOrUrl, onReady) {
+        const preloaded = this.resources.items[nameOrUrl]
+
+        if (preloaded) {
+            this.configureImageTexture(preloaded)
+            onReady(preloaded)
+            return
+        }
+
+        new THREE.TextureLoader().load(nameOrUrl, (loaded) => {
             this.configureImageTexture(loaded)
-            this.uImageSize.value.set(loaded.image.width, loaded.image.height)
-            this.imageTextureNode.value = loaded
-            this.customImageLoaded = true
+            onReady(loaded)
         }, undefined, () => {
-            console.warn(`Crowd image failed to load: ${url}`)
+            console.warn(`Crowd image not found (resource name or path): ${nameOrUrl}`)
+        })
+    }
+
+    // Re-requesting the currently shown image is a no-op (choreography cues
+    // re-assert their image every frame)
+    loadImage(nameOrUrl) {
+        if (nameOrUrl === this.imageKey)
+            return
+
+        this.imageKey = nameOrUrl
+        this.resolveImage(nameOrUrl, (imageTexture) => {
+            this.applyImage(imageTexture)
+            this.customImageLoaded = true
+        })
+    }
+
+    // Point every image sample node at this texture
+    applyImage(imageTexture) {
+        this.uImageSize.value.set(imageTexture.image.width, imageTexture.image.height)
+        for (const node of this.imageTextureNodes)
+            node.value = imageTexture
+    }
+
+    // Gather the image sweep's set: the simultaneous fronts each carry one
+    // of these, front i showing image i % set length (see syncImageCopies).
+    // Resources items resolve instantly; path fallbacks slot in as they load.
+    // Re-requesting the current set is a no-op, so callers (like the
+    // choreographer) can call this every frame.
+    loadImageSet(namesOrUrls) {
+        const setKey = namesOrUrls.join('|')
+
+        if (setKey === this.imageSetKey)
+            return
+
+        this.imageSetKey = setKey
+        this.imageSet = new Array(namesOrUrls.length).fill(null)
+
+        namesOrUrls.forEach((nameOrUrl, index) => {
+            this.resolveImage(nameOrUrl, (imageTexture) => {
+                this.imageSet[index] = imageTexture
+                this.customImageLoaded = true
+
+                // Retargets the static display too, so the single-image
+                // guard no longer knows what's shown
+                if (index === 0) {
+                    this.applyImage(imageTexture)
+                    this.imageKey = null
+                }
+
+                this.syncImageCopies()
+            })
+        })
+    }
+
+    // Distribute the loaded set across the unrolled image-front samplers
+    // (round-robin) with each copy's own dimensions
+    syncImageCopies() {
+        const loaded = this.imageSet?.filter(Boolean)
+
+        if (!loaded?.length || !this.imageWaveTextureNodes)
+            return
+
+        this.imageWaveTextureNodes.forEach((node, index) => {
+            const imageTexture = loaded[index % loaded.length]
+            node.value = imageTexture
+            this.uImageSizes.array[index].set(imageTexture.image.width, imageTexture.image.height)
         })
     }
 
@@ -563,12 +811,28 @@ export default class Crowd {
         // Tint-without-movement waves have nothing to catch the eye, so
         // only they get the slower, wider radial front
         const colorOnlyFlag = this.uWaveTint.mul(float(1).sub(this.uWaveMove))
-        const radialSpeed = mix(float(WAVE_SPEED), float(WAVE_SPEED * COLOR_WAVE_SPEED_FACTOR), colorOnlyFlag)
-        const radialWidth = mix(float(WAVE_WIDTH), float(WAVE_WIDTH * COLOR_WAVE_WIDTH_FACTOR), colorOnlyFlag)
+        const radialSpeed = mix(this.uWaveSpeed, this.uWaveSpeed.mul(COLOR_WAVE_SPEED_FACTOR), colorOnlyFlag)
+        const radialWidth = mix(this.uWaveWidth, this.uWaveWidth.mul(COLOR_WAVE_WIDTH_FACTOR), colorOnlyFlag)
 
-        // Loop mode: wrap time modulo the interval (offset so all copies are
-        // live) — the MAX_REPEATS unrolled copies then act as the youngest
-        // fronts of an infinite train, each reborn at the stage as it exits
+        // A sweep front's total life is one full turn (2π). uSweepSpeed is
+        // ±2π / sweepLapTime, so a full turn takes sweepLapTime (reaching
+        // the opposite side at the halfway point). The fade-out (below)
+        // follows this, so a front dies back where it was born — behind the
+        // stage, where there are no stands to see it.
+        //
+        // Capped at the copy budget (interval * (MAX_REPEATS - 1)): if the
+        // interval is so small that a full turn needs more than MAX_REPEATS
+        // fronts alive at once, they fade out at the budget's edge instead
+        // of popping when their copy is recycled (a graceful degradation —
+        // the sweep just won't reach all the way around).
+        const sweepLife = TWO_PI.div(abs(this.uSweepSpeed))
+            .min(this.uWaveInterval.mul(MAX_REPEATS - 1))
+
+        // Both patterns share one train model: a new front spawns every
+        // uWaveInterval. In loop mode time wraps modulo the interval and the
+        // MAX_REPEATS unrolled copies become a rolling window of the most
+        // recent fronts — radial ones leave through the venue's edge, sweep
+        // ones fade out behind the stage, so the recycle is never seen.
         const loopedTime = this.uWaveTime.mod(this.uWaveInterval)
             .add(this.uWaveInterval.mul(MAX_REPEATS - 1))
 
@@ -578,6 +842,9 @@ export default class Crowd {
         const waveTime = mix(this.uWaveTime, loopedTime, this.uWaveLoop).sub(reactionJitter)
 
         let sum = float(0)
+        // Per-wave color mode: each front's bell, weighted by that front's
+        // own color from the sequence
+        let colorSum = vec3(0)
 
         for (let i = 0; i < MAX_REPEATS; i++) {
             // In loop mode every copy exists regardless of the repeats slider
@@ -590,19 +857,40 @@ export default class Crowd {
             const radial = bell(radialFront.div(radialWidth))
 
             // Sweep: front circles the venue; wrap the angle diff to [-π, π]
-            const sweepAngle = copyTime.mul(SWEEP_SPEED).add(this.uSweepStart)
+            const sweepAngle = copyTime.mul(this.uSweepSpeed).add(this.uSweepStart)
             const angleDelta = angle.sub(sweepAngle).add(PI).mod(TWO_PI).sub(PI)
-            const sweepFade = clamp(copyTime, 0, 1).mul(clamp(float(WAVE_DURATION).sub(copyTime), 0, 1))
+            // Fade in over the first second, fade out over the last second
+            // of the front's life (one full turn) — both happen behind the
+            // stage, so a front's birth and death are invisible
+            const sweepFade = clamp(copyTime, 0, 1).mul(clamp(sweepLife.sub(copyTime), 0, 1))
             const sweep = bell(angleDelta.div(this.uSweepWidth)).mul(sweepFade)
 
-            sum = sum.add(select(isSweep, sweep, radial).mul(started).mul(exists))
+            const contribution = select(isSweep, sweep, radial).mul(started).mul(exists)
+            sum = sum.add(contribution)
+
+            // Which spawned front this copy shows, so perWave can color it.
+            // In a finite train copy i is simply the i-th front. In loop
+            // mode the copies recycle, so the front number advances with the
+            // generation counter (floor(time / interval)); as time crosses
+            // an interval a front shifts down one copy and its number — and
+            // thus its color — stays with it, so a single front never
+            // changes color, and each new spawn takes the next color.
+            const waveIndex = select(
+                this.uWaveLoop.greaterThan(0.5),
+                this.uWaveTime.div(this.uWaveInterval).floor().sub(MAX_REPEATS - 1 - i),
+                float(i),
+            )
+            const colorIndex = waveIndex.mod(this.uWaveColorCount).toInt()
+            colorSum = colorSum.add(this.uWaveColors.element(colorIndex).mul(contribution))
         }
 
-        const glow = sum.min(1.5).mul(step(0, this.uWaveTime))
+        const glow = sum.min(1.5).mul(step(0, this.uWaveTime)).mul(this.uWaveAmp)
 
         return {
             move: glow.mul(this.uWaveMove),
             glow,
+            // Overlapping fronts blend their colors by their local weight
+            perWaveColor: colorSum.div(sum.max(0.001)),
         }
     }
 
@@ -654,31 +942,54 @@ export default class Crowd {
             .toInt()
         const member = this.uPalette.element(paletteIndex).mul(lightSpread)
 
-        const base = select(this.uPaletteCount.greaterThan(0), member, fallback)
+        // Crossfade instead of a hard select, so the crowd eases between
+        // the idle look and the song's palette (see update)
+        const base = mix(fallback, member, this.uPaletteMix)
 
         // Crowd display: each person samples "their" pixel (grid coords are
         // instanced attributes, so they cross to the fragment stage as a
         // varying). Out-of-image or transparent pixels keep the normal look.
-        const grid = varying(attribute('crowdGrid', 'vec2'))
+        const gridAttr = attribute('crowdGrid', 'vec2')
 
-        // col grows along the stand's local +X, which reads right-to-left
-        // from the stage's viewpoint — negate X so the image isn't mirrored.
-        // The continuous pixel coordinate is snapped to an explicit texel
-        // center with a quarter-texel bias: row counts alternate odd/even,
-        // which would otherwise park some rows exactly on texel edges where
+        // Two horizontal mappings, selected by uImageWrap:
+        // - grid (0): per-stand columns — every stand shows its own centered
+        //   copy of the image
+        // - wrap (1): ONE image around the whole bowl — EXACTLY the image
+        //   sweep's arc-length projection (angle delta times the seat's own
+        //   distance to the stage), with the front frozen at the back
+        //   stand's center (azimuth 0). Centered on the back stand, the
+        //   overflow continues onto the side stands the same way a sweep
+        //   image crosses from one stand to the next.
+        // col/azimuth grow along +X, which reads right-to-left from the
+        // stage's viewpoint — negate so the image isn't mirrored. Snapped
+        // to a texel in the VERTEX stage (whole stick agrees on one pixel)
+        // with a quarter-texel bias: row counts alternate odd/even, which
+        // would otherwise park some rows exactly on texel edges where
         // nearest-filtering flickers between the two neighboring pixels.
-        const pixel = vec2(grid.x.negate(), grid.y).add(this.uImageSize.mul(0.5))
-        const texel = pixel.add(0.25).floor()
+        const waveAttr = attribute('crowdWave', 'vec4')
+        const wrapDelta = waveAttr.y.add(PI).mod(TWO_PI).sub(PI)
+        const wrapX = wrapDelta.negate().mul(waveAttr.x).div(PERSON_SPACING)
+        const pixelX = mix(gridAttr.x.negate(), wrapX, this.uImageWrap)
+        const pixel = vec2(pixelX, gridAttr.y).add(this.uImageSize.mul(0.5))
+        const texel = varying(pixel.add(0.25).floor())
         const imageUv = texel.add(0.5).div(this.uImageSize)
         const imageSample = texture(this.imageTexture, imageUv)
-        this.imageTextureNode = imageSample
+        // Every texture() node sampling the crowd image — loadImage must
+        // swap the texture on all of them
+        this.imageTextureNodes = [imageSample]
 
         const inBounds = step(0, texel.x).mul(step(texel.x, this.uImageSize.x.sub(1)))
             .mul(step(0, texel.y)).mul(step(texel.y, this.uImageSize.y.sub(1)))
-        const imageAmount = this.uImageMix.mul(inBounds).mul(step(0.5, imageSample.a))
+        // Optional restriction of the static display to the center (back)
+        // stand: its swayMode is odd (front-back sway), the side stands'
+        // even — parity is a clean stand id already in the packed attribute
+        const standParity = varying(attribute('crowdWave', 'vec4').z.mod(2))
+        const standMask = mix(float(1), standParity, this.uImageCenterOnly)
+
+        const imageAmount = this.uImageMix.mul(inBounds).mul(step(0.5, imageSample.a)).mul(standMask)
         const displayBase = mix(base, imageSample.rgb, imageAmount)
 
-        const {move, glow} = this.wavePulse()
+        const {move, glow, perWaveColor} = this.wavePulse()
 
         // Same math as the position waves, different output: the pulse is
         // computed in the vertex stage (where the instanced attributes
@@ -694,21 +1005,107 @@ export default class Crowd {
         const gradientPos = waveGlow.min(1).mul(this.uWaveColorCount.sub(1)).max(0)
         const gradientIndex = gradientPos.floor().toInt()
         const nextIndex = gradientIndex.add(1).min(this.uWaveColorCount.toInt().sub(1)).max(0)
-        const waveColor = mix(
+        const gradientColor = mix(
             this.uWaveColors.element(gradientIndex),
             this.uWaveColors.element(nextIndex),
             gradientPos.fract(),
         )
 
-        const tinted = mix(displayBase, waveColor, waveGlow.mul(this.uWaveTint).min(1))
+        // Per-wave mode: each consecutive front carries the next color of
+        // the sequence whole (computed in the vertex stage alongside the
+        // pulse, carried across as a varying)
+        const waveColor = mix(gradientColor, varying(perWaveColor), this.uWaveColorMode)
+
+        // Tint strength is decoupled from the gradient position: the glow
+        // still picks WHICH color of the sequence, but the blend over the
+        // stick's base color saturates early (x3), so the first colors of
+        // the array show as fully as the last one instead of being washed
+        // out on the bell's shoulders — equal-strength color bands riding
+        // the front.
+        const tintStrength = waveGlow.mul(3).min(1)
+        const tinted = mix(displayBase, waveColor, tintStrength.mul(this.uWaveTint))
         const beatPulse = max(sin(this.uSwayPhase.mul(2)), 0).pow(4).mul(0.25)
         const animated = tinted.mul(waveGlow.mul(2.0).add(beatPulse).add(0.9))
 
         // "Image sticks" solo mode: in-image sticks show their pixel color
         // verbatim — no wave tint, no glow, no beat pulse. Sticks outside
         // the image (or on transparent pixels) keep the normal behavior.
-        const soloAmount = this.uImageSolo.mul(inBounds).mul(step(0.5, imageSample.a))
-        material.colorNode = mix(animated, imageSample.rgb, soloAmount)
+        const soloAmount = this.uImageSolo.mul(inBounds).mul(step(0.5, imageSample.a)).mul(standMask)
+        // uImageFlash dims the image itself: a flicker fade darkens the
+        // picture toward black in place instead of dissolving it into the
+        // crowd colors (membership and brightness are separate knobs)
+        const soloed = mix(animated, imageSample.rgb.mul(this.uImageFlash), soloAmount)
+
+        // Flicker blackout: every stick NOT currently showing an image
+        // pixel fades to black — the image-sweep look without the sweep.
+        // Scaled by (1 - soloAmount) so the image itself stays lit; during
+        // a flash's off phase soloAmount is 0 and the whole venue is dark.
+        const blackout = this.uImageBlackout.mul(float(1).sub(soloAmount))
+        const blacked = mix(soloed, vec3(0), blackout)
+
+        // Image sweep wave: the picture is anchored on the travelling sweep
+        // front and read by arc length — a person `delta` radians from the
+        // front at distance d sits delta*d/PERSON_SPACING person-columns from
+        // the image's center, so the image keeps its proportions on every
+        // row. Rows reuse the static grid mapping. Computed in the vertex
+        // stage (instanced attributes) and carried across as a varying.
+        const waveData = attribute('crowdWave', 'vec4')
+        const sweepFrontAngle = this.uWaveTime.mul(this.uImageSweepSpeed).add(this.uSweepStart)
+
+        // Up to MAX_IMAGE_COPIES fronts, evenly spaced around the circle,
+        // each sampling its own texture (assigned from the image set by
+        // syncImageCopies). Blackout canvas: sticks stay black unless one
+        // copy's opaque pixel lands on them; copies sum (they never overlap
+        // for sanely sized images).
+        this.imageWaveTextureNodes = []
+        let sweepImageColor = vec3(0)
+        // How much of this stick any image front covers (0..1) — lets the
+        // no-blackout mode override only the covered sticks
+        let sweepCoverage = float(0)
+
+        for (let i = 0; i < MAX_IMAGE_COPIES; i++) {
+            const exists = step(i, this.uImageCopies.sub(1))
+            const copyAngle = sweepFrontAngle.add(float(i).mul(TWO_PI).div(this.uImageCopies))
+            const copyDelta = waveData.y.sub(copyAngle).add(PI).mod(TWO_PI).sub(PI)
+            const copySize = this.uImageSizes.element(i)
+
+            // Negated for the same reason as the static display's grid.x:
+            // larger azimuth reads leftward from the stage, image columns
+            // grow rightward. Snapped to a texel INSIDE the varying — i.e.
+            // in the vertex stage — so the whole stick agrees on one pixel:
+            // flooring the continuous coordinate per fragment speckles near
+            // texel edges. Quarter-texel bias as in the static display
+            // (rows alternate integer/half-integer centering).
+            const copyTexel = varying(vec2(
+                copyDelta.negate().mul(waveData.x).div(PERSON_SPACING).add(copySize.x.mul(0.5)),
+                attribute('crowdGrid', 'vec2').y.add(copySize.y.mul(0.5)),
+            ).add(0.25).floor())
+            const copyUv = copyTexel.add(0.5).div(copySize)
+            // Each copy gets its OWN placeholder texture object: samplers
+            // built on the same texture are deduplicated into one binding,
+            // and every copy would then show whatever the last sync wrote
+            const copySample = texture(this.imageTexture.clone(), copyUv)
+            this.imageWaveTextureNodes.push(copySample)
+
+            const copyInBounds = step(0, copyTexel.x).mul(step(copyTexel.x, copySize.x.sub(1)))
+                .mul(step(0, copyTexel.y)).mul(step(copyTexel.y, copySize.y.sub(1)))
+
+            const copyShow = copyInBounds.mul(step(0.5, copySample.a)).mul(exists)
+            sweepImageColor = sweepImageColor.add(copySample.rgb.mul(copyShow))
+            sweepCoverage = sweepCoverage.add(copyShow)
+        }
+
+        // Fade the blackout in and out over the wave's lifetime. The sweep
+        // angle is periodic (one lap = uImageLapTime), so a looping train
+        // needs no time wrapping — just skip the fade-out until toggled off.
+        const imageWaveFade = clamp(this.uWaveTime, 0, 1)
+            .mul(mix(clamp(this.uImageLapTime.sub(this.uWaveTime), 0, 1), float(1), this.uWaveLoop))
+            .mul(step(0, this.uWaveTime))
+        // Blackout on: the whole venue mixes toward the copies' color
+        // (black outside the images). Blackout off: only covered sticks
+        // take the image, the rest of the crowd stays lit.
+        const sweepMask = mix(sweepCoverage.min(1), float(1), this.uImageWaveBlackout)
+        material.colorNode = mix(blacked, sweepImageColor, this.uImageWave.mul(imageWaveFade).mul(this.uWaveAmp).mul(sweepMask))
 
         // Stick size: scale around this instance's own hand position (baked
         // world-space attribute) so length grows upward and width thickens
@@ -809,6 +1206,13 @@ export default class Crowd {
             return
         }
 
+        // Second debug swatch set: the fallback sequence is the two colors
+        // as-is (no lightness expansion)
+        if (this.waveColorFallback2) {
+            this.setWaveColors([this.waveColorFallback, this.waveColorFallback2])
+            return
+        }
+
         const hsl = {}
         this.waveColorFallback.getHSL(hsl)
         const lighter = new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + 0.3))
@@ -822,7 +1226,14 @@ export default class Crowd {
         for (let i = 0; i < count; i++)
             this.uPalette.array[i].set(colors[i])
 
-        this.uPaletteCount.value = count
+        // Clearing keeps the old colors and count in place: the crossfade
+        // eases back to the fallback look over the outgoing palette —
+        // zeroing the count here would reshuffle everyone's member color
+        // mid-fade
+        if (count > 0)
+            this.uPaletteCount.value = count
+
+        this.paletteMixTarget = count > 0 ? 1 : 0
     }
 
     setWaveColors(colors) {
@@ -843,6 +1254,11 @@ export default class Crowd {
         this.uWavePattern.value = type.pattern
         this.uWaveMove.value = type.move ? 1 : 0
         this.uWaveTint.value = type.tint ? 1 : 0
+        this.uImageWave.value = type.image ? 1 : 0
+
+        // The image sweep needs pictures; fall back to the default set
+        if (type.image && !this.imageSet?.length)
+            this.loadImageSet(DEFAULT_IMAGE_SET)
     }
 
     startWave(startedAt, forcedType = null) {
@@ -850,7 +1266,127 @@ export default class Crowd {
 
         // Same timestamp on every client -> same wave type everywhere
         // (forcedType is for the debug panel's local previews)
-        this.applyType(forcedType ?? Math.abs(Math.floor(startedAt)) % WAVE_TYPES.length)
+        this.applyType(forcedType ?? Math.abs(Math.floor(startedAt)) % RANDOM_WAVE_COUNT)
+    }
+
+    stopWave() {
+        this.waveStartedAt = null
+        this.uWaveTime.value = -1
+    }
+
+    // The debug panel's current numbers as a choreography cue
+    // (shared/crowdChoreography.js schema) — at/until are placeholders
+    buildCueFromDebug() {
+        const type = WAVE_TYPES[this.debugParams.waveType]
+        const round = (value, factor = 100) => Math.round(value * factor) / factor
+
+        if (type.image) {
+            const cue = {
+                at: 0,
+                until: round(this.uImageLapTime.value),
+                action: 'imageSweep',
+                images: this.imageSetKey ? this.imageSetKey.split('|') : [...DEFAULT_IMAGE_SET],
+                copies: this.uImageCopies.value,
+                lapTime: round(this.uImageLapTime.value),
+            }
+
+            if (this.uImageSweepSpeed.value > 0)
+                cue.direction = 'ccw'
+
+            if (this.uImageWaveBlackout.value !== 1)
+                cue.blackout = false
+
+            return cue
+        }
+
+        const cue = {
+            at: 0,
+            until: 10,
+            action: 'wave',
+            pattern: type.pattern === 0 ? 'radial' : 'sweep',
+        }
+
+        if (!type.move)
+            cue.move = false
+
+        if (type.tint) {
+            cue.colors = this.debugParams.waveColor2
+                ? [this.debugParams.waveColor, this.debugParams.waveColor2]
+                : [this.debugParams.waveColor]
+
+            // Gradient is the cue default — only per-wave needs the flag
+            if (this.uWaveColorMode.value === 1)
+                cue.colorMode = 'perWave'
+        }
+
+        if (type.move)
+            cue.lift = round(this.uWaveLift.value)
+
+        // Looping trains ignore the repeats count (every copy exists)
+        if (!this.debugParams.loopWave)
+            cue.repeats = Math.round(this.uWaveRepeats.value)
+
+        cue.interval = round(this.uWaveInterval.value)
+
+        if (type.pattern === 0) {
+            cue.speed = round(this.uWaveSpeed.value)
+            cue.width = round(this.uWaveWidth.value)
+        } else {
+            // lapTime = seconds for a full turn around the venue
+            cue.lapTime = round((Math.PI * 2) / Math.abs(this.uSweepSpeed.value))
+            cue.width = round(this.uSweepWidth.value, 1000)
+
+            if (this.uSweepSpeed.value > 0)
+                cue.direction = 'ccw'
+        }
+
+        // Cue default is loop: true — only a one-shot needs the flag
+        if (!this.debugParams.loopWave)
+            cue.loop = false
+
+        return cue
+    }
+
+    // JS-object-literal formatting (unquoted keys, single-quoted strings)
+    // so the cue pastes into shared/crowdChoreography.js in-house style
+    formatCue(cue) {
+        const formatValue = (value) => {
+            if (Array.isArray(value))
+                return `[${value.map(formatValue).join(', ')}]`
+
+            if (typeof value === 'string')
+                return `'${value}'`
+
+            return String(value)
+        }
+
+        const body = Object.entries(cue)
+            .map(([key, value]) => `    ${key}: ${formatValue(value)}`)
+            .join(',\n')
+
+        return `{\n${body}\n},`
+    }
+
+    copyCueToClipboard() {
+        const json = this.formatCue(this.buildCueFromDebug())
+
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(json)
+                .then(() => console.log(`Cue copied to clipboard:\n${json}`))
+                .catch(() => console.log(`Clipboard unavailable — cue JSON:\n${json}`))
+        } else {
+            console.log(`Clipboard unavailable — cue JSON:\n${json}`)
+        }
+    }
+
+    // Card-stunt wave: pass one image or an array (paths under public/) and
+    // they circle the venue on a blacked-out crowd, one image per lap.
+    // Omit `urls` to reuse the loaded set.
+    startImageWave(startedAt, urls = null) {
+        if (urls)
+            this.loadImageSet(Array.isArray(urls) ? urls : [urls])
+
+        this.startWave(startedAt, WAVE_TYPES.findIndex((type) => type.image))
     }
 
     update() {
@@ -866,18 +1402,46 @@ export default class Crowd {
             const song = songs.find((candidate) => candidate.id === dance.songId)
             tempo = song?.tempo ?? IDLE_TEMPO
             time = Math.max(0, (network.serverClock.now() - dance.startedAt) / 1000)
+
+            // The song's cue timeline runs off the same synced clock
+            this.choreographer.update(time, dance)
+        } else {
+            this.choreographer.release()
         }
 
         this.uSwayPhase.value = (time * (tempo / 60) * Math.PI) % (Math.PI * 2)
+
+        // Ease the idle-colors <-> song-palette crossfade toward its target
+        if (this.uPaletteMix.value !== this.paletteMixTarget) {
+            const fadeStep = (this.experience.time.delta / 1000) / this.paletteFade
+
+            this.uPaletteMix.value = this.uPaletteMix.value < this.paletteMixTarget
+                ? Math.min(this.paletteMixTarget, this.uPaletteMix.value + fadeStep)
+                : Math.max(this.paletteMixTarget, this.uPaletteMix.value - fadeStep)
+        }
 
         if (this.waveStartedAt !== null) {
             const waveTime = (network.serverClock.now() - this.waveStartedAt) / 1000
 
             // The last repeat starts (repeats - 1) intervals after the first;
-            // a looping train never expires until toggled off
-            const totalDuration = WAVE_DURATION
-                + (this.uWaveRepeats.value - 1) * this.uWaveInterval.value
-            const looping = this.debugParams?.loopWave === true
+            // a looping train never expires until toggled off. A sweep (image
+            // or regular) lives one full lap, however slow the lap is set;
+            // radial fronts cross the venue in WAVE_DURATION.
+            const imageWave = this.uImageWave.value === 1
+            const isSweep = this.uWavePattern.value === 1
+
+            let baseLife = WAVE_DURATION
+            if (imageWave)
+                baseLife = this.uImageLapTime.value
+            else if (isSweep)
+                baseLife = (Math.PI * 2) / Math.abs(this.uSweepSpeed.value)
+
+            const totalDuration = imageWave
+                ? baseLife
+                : baseLife + (this.uWaveRepeats.value - 1) * this.uWaveInterval.value
+            // The loop uniform is the source of truth (the debug button and
+            // choreography cues both drive it; debugParams may not exist)
+            const looping = this.uWaveLoop.value === 1
 
             if (!looping && waveTime > totalDuration) {
                 this.waveStartedAt = null

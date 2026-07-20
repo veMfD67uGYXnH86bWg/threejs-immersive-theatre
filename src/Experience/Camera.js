@@ -14,7 +14,7 @@ export default class Camera {
         if (this.debug.active) {
             this.debugFolder = this.debug.ui.addFolder({
                 title: 'Camera',
-                expanded: true
+                expanded: false
             })
         }
 

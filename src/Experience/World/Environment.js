@@ -12,7 +12,7 @@ export default class Environment {
             this.debugFolder = this.debug.ui.addFolder(
                 {
                     title: 'Environment',
-                    expanded: true,
+                    expanded: false,
                 })
         }
 

@@ -23,7 +23,8 @@ export default [
         youtubeId: 'LBhcqYqeu0U',
         duration: 187000,
         tempo: 128,
-        colors: ['#8fd6ff', '#ffd166', '#c2f970', '#ff9de2']
+        // colors: ['#e0ef00', '#52525e', '#2b6b0b', '#ffffd1'],
+        colors: ['#e0ef00', '#2b6b0b', '#ffffd1'],
     },
     {
         id: 'song-b',
@@ -31,7 +32,8 @@ export default [
         artist: 'IVE',
         youtubeId: 'l-jZOXa7gQY',
         duration: 177000,
-        tempo: 118
+        tempo: 118,
+        colors: ['#0e8bff', '#f74ae3', '#ffffff', "#d92133"]
     },
     {
 
@@ -40,7 +42,8 @@ export default [
         artist: 'Red Velvet',
         youtubeId: 'Q-ZxAm-yPE8',
         duration: 225000,
-        tempo: 106
+        tempo: 106,
+        colors: ['#c21e56', '#eeb211', '#0070b8', '#32cd32', '#6c3082']
     },
     {
 
@@ -49,7 +52,7 @@ export default [
         artist: 'Lena Raine',
         youtubeId: 'MokkEQR6tdI',
         duration: 181000,
-        tempo: 120
+        tempo: 120,
     },
     {
 
@@ -59,6 +62,5 @@ export default [
         youtubeId: 'TadhhUt9BPc',
         duration: 203000,
         tempo: 129,
-        colors: ['#e84c3d', '#f1c40f', '#9b59b6', '#3498db', '#2ecc71', '#e67ce2']
     },
 ]

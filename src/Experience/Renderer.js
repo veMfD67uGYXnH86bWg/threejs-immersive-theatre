@@ -27,7 +27,7 @@ export default class Renderer {
         if (this.debug.active) {
             this.rendererFolder = this.debug.ui.addFolder({
                 title: 'Renderer',
-                expanded: true
+                expanded: false
             })
         }
 
