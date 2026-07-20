@@ -41,15 +41,24 @@
  *   loop     — default true: waves keep coming for the whole window;
  *              false = one single wave fired at `at`
  *
- * 'imageSweep' — blackout + images circling the venue (card stunt):
- *   images   — Resources item names (sources.js) or paths under public/
- *   copies   — simultaneous fronts (1..4), round-robin over `images`
- *   scale    — image size on the crowd; 1 (default) = one image pixel per
- *              person. The crowd canvas is 14 rows tall and ~159 columns
- *              around at the front row (~298 at the back), so the images'
- *              total width must fit that budget or fronts overlap. Use
- *              13 / imageHeight to make art exactly fill the height.
- *   lapTime  — seconds per full lap
+ * 'imageSweep' — blackout + a strip of images travelling around the venue
+ * like a marquee (card stunt). The images are laid end to end in array
+ * order, so they can never overlap however wide they are — a set wider than
+ * the venue simply scrolls through like a ticker.
+ *   images   — Resources item names (sources.js) or paths under public/,
+ *              in the order they appear along the strip (max 8)
+ *   spacing  — gap between images, in columns. One column is the arc one
+ *              person occupies, the same unit as the images' pixel widths,
+ *              so `spacing: 30` next to a 60px image is a half-image gap.
+ *   start    — degrees of travel from behind the stage to image 1's leading
+ *              edge at the cue's start (default 0 = the sequence begins
+ *              behind the stage). Images run dead zone -> stage right ->
+ *              back stand -> stage left -> dead zone, so ~225 starts them
+ *              at the near edge of the stage-left stand.
+ *   lapTime  — seconds for the strip to travel one full turn
+ *   loop     — true (default): endless marquee, the sequence repeats; false:
+ *              the strip passes by once. The repeat seam sits behind the
+ *              stage, where there are no stands to see it.
  *   direction— travel: 'cw' (default) or 'ccw'
  *   blackout — true (default): the venue blacks out under the images;
  *              false: the crowd stays lit, images ride over it
@@ -81,7 +90,7 @@ export default {
             until: 16,
             action: 'imageSweep',
             images: ['giselle2', 'karina2', 'ningning2', 'winter2'],
-            copies: 4,
+            spacing: 30,
             lapTime: 8,
             blackout: true,
             ease: {out: 0.5},
@@ -190,16 +199,19 @@ export default {
 
     // Love Dive — IVE
     'song-b': [
-
         {
             at: 0,
-            until: 64,
+            until: 22,
             action: 'imageSweep',
-            images: ['yujin1', 'gaeul1', 'rei1', 'wonyoung1', 'liz1', 'leeseo1', 'ive1', 'lovedive1'],
-            copies: 8,
-            lapTime: 16,
+            images: ['lovedive1', 'ive1', 'leeseo1', 'liz1', 'wonyoung1', 'rei1', 'gaeul1', 'yujin1'],
+            spacing: 25,
+            start: -720,
+            // start: 360,
+            lapTime: 8,
+            loop: false,
             blackout: true,
-            ease: {out: 0.5},
+            ease: {out: 1},
+            // direction: 'ccw',
         },
     ],
 
@@ -242,7 +254,7 @@ export default {
             action: 'wave',
             pattern: 'sweep',
             colorMode: 'perWave',
-            colors: ['#76E1CE', '#56A4B8', '#498B8F'],
+            colors: ['#76E1CE', '#04bb43'],
             // colors: ['#76E1CE', '#3ef500', '#f80000'],
             lift: 1.15,
             interval: 0.55,

@@ -94,12 +94,16 @@ const RANDOM_WAVE_COUNT = WAVE_TYPES.filter((type) => !type.image).length
 // cheap vertex-stage computation, so a high count is affordable.
 const MAX_REPEATS = 32
 
-// The image sweep can carry this many simultaneous fronts, evenly spaced
-// around the venue, each with its own image from the set. Unrolled at
+// The image sweep's strip can hold this many distinct images. Unrolled at
 // material-build time — one texture sample AND one texture binding per
-// copy, so this eats into WebGPU's per-stage sampled-texture budget (16 by
-// default; the static display uses one more).
+// slot, so this eats into WebGPU's per-stage sampled-texture budget (16 by
+// default; the static display uses one more). WGSL can't index textures
+// dynamically, which is why this is a hard cap rather than a setting.
 const MAX_IMAGE_COPIES = 8
+
+// Default gap between images on the strip, in columns (1 column = the arc
+// one person occupies, so it's the same unit as the images' pixel widths)
+const IMAGE_SPACING = 12
 
 // Uniform arrays are fixed-size: room for this many member colors per song
 const MAX_PALETTE = 12
@@ -126,7 +130,7 @@ const DEFAULT_IMAGE_COLOR = '#ff2d95'
 // The image sweep's default pictures — Resources item names (sources.js);
 // arbitrary paths under public/ also work as a fallback. Replace via
 // startImageWave(at, [names]) or loadImageSet()
-const DEFAULT_IMAGE_SET = ['aespa1', 'karina2']
+const DEFAULT_IMAGE_SET = ['aespa1', 'lovedive1', 'gaeul1']
 
 /**
  * The fake audience filling the stadium stands: two InstancedMeshes (bodies
@@ -202,7 +206,25 @@ export default class Crowd {
         this.uImageWave = uniform(0) // 1 = blackout + the image rides the sweep front
         this.uImageSweepSpeed = uniform(SWEEP_SPEED) // rad/s of the image sweep (negative = clockwise)
         this.uImageLapTime = uniform(WAVE_DURATION) // s per image lap; kept in sync with the speed
-        this.uImageCopies = uniform(1) // 1..MAX_IMAGE_COPIES simultaneous image fronts
+        // Seconds for the whole strip to clear the venue — a strip longer
+        // than the ring takes several laps, so this is NOT uImageLapTime.
+        // Recomputed every frame in update(), where all its inputs live.
+        this.uImageSweepDuration = uniform(WAVE_DURATION)
+        this.imageSweepDuration = WAVE_DURATION
+        // Image strip: the set is laid end to end along a virtual track that
+        // travels around the venue, like a marquee. Each image's offset is
+        // computed on the CPU from the real widths (see buildImageStrip), so
+        // the images occupy disjoint ranges and can never overlap, whatever
+        // their size. Positions are angular (row-independent) so a column
+        // lands at the same azimuth on every row.
+        this.uImageCount = uniform(1) // images actually in the strip
+        this.uImageOffsets = uniformArray(Array.from({length: MAX_IMAGE_COPIES}, () => 0))
+        this.uImageStripLength = uniform(1) // columns; the loop wraps on this
+        this.uImageStripLoop = uniform(1) // 1 = endless marquee, 0 = passes once
+        // Where image 1's leading edge sits at t = 0, in columns measured
+        // along the travel direction from the hidden wrap behind the stage
+        this.uImageStripStart = uniform(0)
+        this.imageSpacing = IMAGE_SPACING // columns of gap between images
         // Per-copy image dimensions (the set's images may differ in size)
         this.uImageSizes = uniformArray(Array.from({length: MAX_IMAGE_COPIES}, () => new THREE.Vector2(1, 1)))
         this.uImageSize = uniform(new THREE.Vector2(1, 1))
@@ -214,6 +236,17 @@ export default class Crowd {
         this.resources = this.experience.resources
 
         this.slots = buildCrowdSlots()
+
+        // How many columns make up a full turn. The strip is positioned by
+        // angle (so a column sits at the same azimuth on every row), and
+        // this sets the scale: at the mean row one column is one person, so
+        // an image renders near 1:1 there — coarser on the near rows, finer
+        // on the far ones.
+        const meanDistance = this.slots.reduce((total, slot) => total + slot.distance, 0) / this.slots.length
+        this.venueColumns = (Math.PI * 2) * meanDistance / PERSON_SPACING
+        this.uVenueColumns = uniform(this.venueColumns)
+        this.buildImageStrip()
+
         this.setBodies()
         this.setLightsticks()
         this.setNetworkEvents()
@@ -249,7 +282,7 @@ export default class Crowd {
         })
 
         this.debugParams = {
-            waveType: 5,
+            waveType: 6,
             loopWave: false,
             lightstickColor: '#ff2d95',
             waveColor: WAVE_COLOR_FALLBACK,
@@ -272,7 +305,7 @@ export default class Crowd {
             view: 'list',
             label: 'Wave Type',
             options: WAVE_TYPES.map((type, index) => ({text: type.name, value: index})),
-            value: 5,
+            value: 6,
         }).on('change', (event) => {
             this.debugParams.waveType = event.value
 
@@ -438,15 +471,36 @@ export default class Crowd {
             this.uImageSweepSpeed.value = -(Math.PI * 2) / event.value
         })
 
-        // Simultaneous image fronts, evenly spaced around the venue
-        this.debugParams.imageCopies = 1
-        this.imageFolder.addBinding(this.debugParams, 'imageCopies', {
-            label: 'Images per Wave',
-            min: 1,
-            max: MAX_IMAGE_COPIES,
+        // Gap between images on the travelling strip, in columns (1 column =
+        // one person of arc, the same unit as the images' pixel widths)
+        this.debugParams.imageSpacing = IMAGE_SPACING
+        this.imageFolder.addBinding(this.debugParams, 'imageSpacing', {
+            label: 'Image Spacing',
+            min: 0,
+            max: 120,
             step: 1,
         }).on('change', (event) => {
-            this.uImageCopies.value = event.value
+            this.setImageSpacing(event.value)
+        })
+
+        // Where image 1 sits when the cue starts, in degrees of travel from
+        // behind the stage (~225 = the leading edge of the stage-left stand)
+        this.debugParams.imageStripStart = 0
+        this.imageFolder.addBinding(this.debugParams, 'imageStripStart', {
+            label: 'Strip Start (°)',
+            min: 0,
+            max: 360,
+            step: 1,
+        }).on('change', (event) => {
+            this.setImageStripStart(event.value)
+        })
+
+        // Endless marquee vs the strip passing by once
+        const stripLoopButton = this.imageFolder.addButton({title: 'Strip Loop: ON'})
+        stripLoopButton.on('click', () => {
+            const looping = this.uImageStripLoop.value !== 1
+            this.uImageStripLoop.value = looping ? 1 : 0
+            stripLoopButton.title = looping ? 'Strip Loop: ON' : 'Strip Loop: OFF'
         })
 
         this.imageFolder.addBinding(this.uImageMix, 'value', {
@@ -745,8 +799,8 @@ export default class Crowd {
             node.value = imageTexture
     }
 
-    // Gather the image sweep's set: the simultaneous fronts each carry one
-    // of these, front i showing image i % set length (see syncImageCopies).
+    // Gather the image sweep's set: these are laid end to end along the
+    // travelling strip in array order (see buildImageStrip).
     // Resources items resolve instantly; path fallbacks slot in as they load.
     // Re-requesting the current set is a no-op, so callers (like the
     // choreographer) can call this every frame.
@@ -771,24 +825,54 @@ export default class Crowd {
                     this.imageKey = null
                 }
 
-                this.syncImageCopies()
+                this.buildImageStrip()
             })
         })
     }
 
-    // Distribute the loaded set across the unrolled image-front samplers
-    // (round-robin) with each copy's own dimensions
-    syncImageCopies() {
-        const loaded = this.imageSet?.filter(Boolean)
+    // Lay the loaded set out along the strip: image i starts where image
+    // i-1 ended plus `imageSpacing`, so the slots' column ranges are
+    // disjoint and no two images can ever cover the same person. The strip
+    // ends with one more gap, so a looping marquee doesn't butt the last
+    // image against the first. Safe to call repeatedly (images arrive async).
+    buildImageStrip() {
+        const loaded = this.imageSet?.filter(Boolean) ?? []
+        const count = Math.min(loaded.length, MAX_IMAGE_COPIES)
+        let offset = 0
 
-        if (!loaded?.length || !this.imageWaveTextureNodes)
+        for (let index = 0; index < count; index++) {
+            const imageTexture = loaded[index]
+
+            this.uImageOffsets.array[index] = offset
+            this.uImageSizes.array[index].set(imageTexture.image.width, imageTexture.image.height)
+
+            if (this.imageWaveTextureNodes?.[index])
+                this.imageWaveTextureNodes[index].value = imageTexture
+
+            offset += imageTexture.image.width + this.imageSpacing
+        }
+
+        this.uImageCount.value = Math.max(count, 1)
+        // Total travel before the pattern repeats (>0 so the shader's mod
+        // stays defined even before any image has loaded)
+        this.uImageStripLength.value = Math.max(offset, 1)
+    }
+
+    // Where the strip's first image starts, as degrees travelled from the
+    // wrap point behind the stage. Images run dead zone -> stage right ->
+    // back stand -> stage left -> dead zone, so ~225 parks image 1 at the
+    // leading edge of the stage-left stand.
+    setImageStripStart(degrees) {
+        this.uImageStripStart.value = (degrees / 360) * this.venueColumns
+    }
+
+    // Gap between images on the strip, in columns; relays out on change
+    setImageSpacing(spacing) {
+        if (spacing === this.imageSpacing)
             return
 
-        this.imageWaveTextureNodes.forEach((node, index) => {
-            const imageTexture = loaded[index % loaded.length]
-            node.value = imageTexture
-            this.uImageSizes.array[index].set(imageTexture.image.width, imageTexture.image.height)
-        })
+        this.imageSpacing = spacing
+        this.buildImageStrip()
     }
 
     // Gaussian pulse around the travelling wave front(s), 0 while inactive.
@@ -1043,41 +1127,52 @@ export default class Crowd {
         const blackout = this.uImageBlackout.mul(float(1).sub(soloAmount))
         const blacked = mix(soloed, vec3(0), blackout)
 
-        // Image sweep wave: the picture is anchored on the travelling sweep
-        // front and read by arc length — a person `delta` radians from the
-        // front at distance d sits delta*d/PERSON_SPACING person-columns from
-        // the image's center, so the image keeps its proportions on every
-        // row. Rows reuse the static grid mapping. Computed in the vertex
-        // stage (instanced attributes) and carried across as a varying.
+        // Image sweep: the set is laid end to end on a virtual strip that
+        // travels around the venue like a marquee. A person's place on that
+        // strip is their azimuth measured from the strip's start, converted
+        // to columns, minus how far the strip has travelled.
+        //
+        // The azimuth is normalised by the FULL turn (not multiplied by the
+        // person's distance), so a given column sits at the same angle on
+        // every row and the images stay vertically aligned up the stands.
+        //
+        // The wrap of `rel` — and so the strip's loop seam — lands exactly
+        // at uSweepStart, which defaults to behind the stage where there
+        // are no stands, hiding the discontinuity.
         const waveData = attribute('crowdWave', 'vec4')
-        const sweepFrontAngle = this.uWaveTime.mul(this.uImageSweepSpeed).add(this.uSweepStart)
+        const rel = waveData.y.sub(this.uSweepStart).negate().mod(TWO_PI)
+        const stripShift = this.uWaveTime.mul(this.uImageSweepSpeed).div(TWO_PI).mul(this.uVenueColumns)
+        // uImageStripStart slides the whole sequence along its own track, so
+        // the first image's leading edge can be parked at a chosen point of
+        // the venue at t = 0 instead of always at the (hidden) wrap
+        const travelled = rel.div(TWO_PI).mul(this.uVenueColumns)
+            .sub(this.uImageStripStart)
+            .add(stripShift)
+        // Looping wraps the track on the strip's length so the sequence
+        // repeats endlessly; otherwise it runs off and the strip passes once
+        const track = mix(travelled, travelled.mod(this.uImageStripLength), this.uImageStripLoop)
 
-        // Up to MAX_IMAGE_COPIES fronts, evenly spaced around the circle,
-        // each sampling its own texture (assigned from the image set by
-        // syncImageCopies). Blackout canvas: sticks stay black unless one
-        // copy's opaque pixel lands on them; copies sum (they never overlap
-        // for sanely sized images).
+        // One slot per image. Offsets are cumulative over the real widths
+        // (see buildImageStrip), so the slots' ranges are disjoint — at most
+        // one image covers a person, and overlap is impossible by
+        // construction however wide the images are.
         this.imageWaveTextureNodes = []
         let sweepImageColor = vec3(0)
-        // How much of this stick any image front covers (0..1) — lets the
+        // How much of this stick any image covers (0..1) — lets the
         // no-blackout mode override only the covered sticks
         let sweepCoverage = float(0)
 
         for (let i = 0; i < MAX_IMAGE_COPIES; i++) {
-            const exists = step(i, this.uImageCopies.sub(1))
-            const copyAngle = sweepFrontAngle.add(float(i).mul(TWO_PI).div(this.uImageCopies))
-            const copyDelta = waveData.y.sub(copyAngle).add(PI).mod(TWO_PI).sub(PI)
+            const exists = step(i, this.uImageCount.sub(1))
             const copySize = this.uImageSizes.element(i)
 
-            // Negated for the same reason as the static display's grid.x:
-            // larger azimuth reads leftward from the stage, image columns
-            // grow rightward. Snapped to a texel INSIDE the varying — i.e.
-            // in the vertex stage — so the whole stick agrees on one pixel:
-            // flooring the continuous coordinate per fragment speckles near
-            // texel edges. Quarter-texel bias as in the static display
-            // (rows alternate integer/half-integer centering).
+            // Snapped to a texel INSIDE the varying — i.e. in the vertex
+            // stage — so the whole stick agrees on one pixel: flooring the
+            // continuous coordinate per fragment speckles near texel edges.
+            // Quarter-texel bias as in the static display (rows alternate
+            // integer/half-integer centering).
             const copyTexel = varying(vec2(
-                copyDelta.negate().mul(waveData.x).div(PERSON_SPACING).add(copySize.x.mul(0.5)),
+                track.sub(this.uImageOffsets.element(i)),
                 attribute('crowdGrid', 'vec2').y.add(copySize.y.mul(0.5)),
             ).add(0.25).floor())
             const copyUv = copyTexel.add(0.5).div(copySize)
@@ -1095,11 +1190,12 @@ export default class Crowd {
             sweepCoverage = sweepCoverage.add(copyShow)
         }
 
-        // Fade the blackout in and out over the wave's lifetime. The sweep
-        // angle is periodic (one lap = uImageLapTime), so a looping train
-        // needs no time wrapping — just skip the fade-out until toggled off.
+        // Fade the blackout in and out over the effect's lifetime. That is
+        // the time for the whole STRIP to clear the venue, not one lap — a
+        // strip longer than the ring needs several. A looping marquee never
+        // finishes, so it skips the fade-out entirely.
         const imageWaveFade = clamp(this.uWaveTime, 0, 1)
-            .mul(mix(clamp(this.uImageLapTime.sub(this.uWaveTime), 0, 1), float(1), this.uWaveLoop))
+            .mul(mix(clamp(this.uImageSweepDuration.sub(this.uWaveTime), 0, 1), float(1), this.uWaveLoop))
             .mul(step(0, this.uWaveTime))
         // Blackout on: the whole venue mixes toward the copies' color
         // (black outside the images). Blackout off: only covered sticks
@@ -1283,15 +1379,20 @@ export default class Crowd {
         if (type.image) {
             const cue = {
                 at: 0,
-                until: round(this.uImageLapTime.value),
+                // Long enough for the whole strip to pass at this lap speed
+                until: round(this.imageSweepDuration),
                 action: 'imageSweep',
                 images: this.imageSetKey ? this.imageSetKey.split('|') : [...DEFAULT_IMAGE_SET],
-                copies: this.uImageCopies.value,
+                spacing: this.imageSpacing,
+                start: this.debugParams.imageStripStart,
                 lapTime: round(this.uImageLapTime.value),
             }
 
             if (this.uImageSweepSpeed.value > 0)
                 cue.direction = 'ccw'
+
+            if (this.uImageStripLoop.value !== 1)
+                cue.loop = false
 
             if (this.uImageWaveBlackout.value !== 1)
                 cue.blackout = false
@@ -1420,19 +1521,31 @@ export default class Crowd {
                 : Math.max(this.paletteMixTarget, this.uPaletteMix.value - fadeStep)
         }
 
+        // How long the image strip needs to clear the venue: its own length,
+        // plus the ring's width, plus whatever the start offset pushes it
+        // back — all at the strip's travel speed. A strip longer than the
+        // ring takes several laps, so this is well over uImageLapTime and
+        // has to be recomputed as spacing/start/images/lapTime change.
+        const columnsPerSecond = this.venueColumns / Math.max(this.uImageLapTime.value, 0.001)
+        const stripTravel = this.venueColumns
+            + this.uImageStripLength.value
+            + Math.abs(this.uImageStripStart.value)
+        this.imageSweepDuration = stripTravel / columnsPerSecond
+        this.uImageSweepDuration.value = this.imageSweepDuration
+
         if (this.waveStartedAt !== null) {
             const waveTime = (network.serverClock.now() - this.waveStartedAt) / 1000
 
             // The last repeat starts (repeats - 1) intervals after the first;
-            // a looping train never expires until toggled off. A sweep (image
-            // or regular) lives one full lap, however slow the lap is set;
-            // radial fronts cross the venue in WAVE_DURATION.
+            // a looping train never expires until toggled off. An image sweep
+            // lives until its whole strip has passed; a regular sweep lives
+            // one full lap; radial fronts cross the venue in WAVE_DURATION.
             const imageWave = this.uImageWave.value === 1
             const isSweep = this.uWavePattern.value === 1
 
             let baseLife = WAVE_DURATION
             if (imageWave)
-                baseLife = this.uImageLapTime.value
+                baseLife = this.imageSweepDuration
             else if (isSweep)
                 baseLife = (Math.PI * 2) / Math.abs(this.uSweepSpeed.value)
 

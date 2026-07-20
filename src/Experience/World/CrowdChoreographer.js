@@ -48,7 +48,7 @@ export default class CrowdChoreographer {
             imageFlash: {node: crowd.uImageFlash},
             imageWrap: {node: crowd.uImageWrap},
             imageWaveBlackout: {node: crowd.uImageWaveBlackout},
-            imageCopies: {node: crowd.uImageCopies},
+            imageStripLoop: {node: crowd.uImageStripLoop},
             imageLapTime: {node: crowd.uImageLapTime},
             imageSweepSpeed: {node: crowd.uImageSweepSpeed},
         }
@@ -63,6 +63,9 @@ export default class CrowdChoreographer {
         this.drivingWave = false
         this.waveColorsCue = null
         this.workColor = new THREE.Color()
+        // Strip spacing lives on the CPU (it relays the image offsets), so
+        // it isn't a uniform param — snapshot it to restore on release
+        this.defaultImageSpacing = crowd.imageSpacing
     }
 
     update(songTime, dance) {
@@ -119,6 +122,8 @@ export default class CrowdChoreographer {
 
         this.drivingWave = false
         this.crowd.stopWave()
+        this.crowd.setImageSpacing(this.defaultImageSpacing)
+        this.crowd.setImageStripStart(0)
 
         if (this.waveColorsCue) {
             this.waveColorsCue = null
@@ -251,9 +256,15 @@ export default class CrowdChoreographer {
 
         if (image) {
             crowd.loadImageSet(cue.images) // no-op when already loaded
+            // Gap between images on the strip, in columns; relays out the
+            // offsets on change (no-op when unchanged)
+            crowd.setImageSpacing(cue.spacing ?? this.defaultImageSpacing)
+            // Degrees of travel from behind the stage to image 1 at t = 0
+            crowd.setImageStripStart(cue.start ?? 0)
 
-            if (cue.copies != null)
-                this.apply('imageCopies', cue.copies)
+            // The strip repeats endlessly unless told otherwise; the wave
+            // loop must agree or the machinery expires the cue mid-travel
+            this.apply('imageStripLoop', cue.loop === false ? 0 : 1)
 
             // blackout: false keeps the crowd lit under the passing images
             this.apply('imageWaveBlackout', cue.blackout === false ? 0 : 1)
