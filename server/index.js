@@ -8,8 +8,10 @@ import {Server} from 'socket.io'
 
 import RoomManager from './RoomManager.js'
 import {checkMessage} from './moderation.js'
+import {matchesBlocklist} from './blocklist.js'
 import emotes from '../shared/emotes.js'
 import {
+    containsUrl,
     sanitizeChatText,
     sanitizeEmoteId,
     sanitizeRoomCode,
@@ -45,6 +47,11 @@ async function validateUsername(rawUsername) {
 
     if (!username)
         return {error: 'Username must be 1-16 letters or numbers'}
+
+    // Blocklist backstop before the LLM check — a slur as a display name
+    // sticks around, so catch the listed terms deterministically
+    if (matchesBlocklist(username))
+        return {error: 'Username not allowed'}
 
     const {flagged} = await checkMessage(username)
 
@@ -175,6 +182,20 @@ io.on('connection', (socket) => {
             return
         }
 
+        // No links — cuts spam, self-promo and phishing. Server is the
+        // authority; the client pre-checks the same rule for instant feedback
+        if (containsUrl(text)) {
+            socket.emit('chat:blocked', {reason: 'link'})
+            return
+        }
+
+        // Hard word blocklist first: deterministic, instant, and catches the
+        // bare slurs the context-based OpenAI moderation lets slip
+        if (matchesBlocklist(text)) {
+            socket.emit('chat:blocked', {reason: 'moderation'})
+            return
+        }
+
         if (room.isChatRateLimited(player))
             return
 
@@ -201,14 +222,6 @@ io.on('connection', (socket) => {
 
         if (!emote)
             return
-
-        // Toggle emotes flip state held on the player (so late joiners see
-        // it via the snapshot) instead of relaying a one-shot emote
-        if (emote.toggle) {
-            player.lightstick = !player.lightstick
-            io.to(room.code).emit('player:lightstick', {id: player.id, active: player.lightstick})
-            return
-        }
 
         if (emote.cooldown) {
             const now = Date.now()

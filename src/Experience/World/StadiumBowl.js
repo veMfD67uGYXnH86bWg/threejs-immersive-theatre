@@ -59,7 +59,7 @@ export function buildCrowdSlots() {
         return seed / 2147483647
     }
 
-    for (const stand of STANDS) {
+    for (const [standIndex, stand] of STANDS.entries()) {
         const cos = Math.cos(stand.yaw)
         const sin = Math.sin(stand.yaw)
 
@@ -98,6 +98,11 @@ export function buildCrowdSlots() {
                     col: i - (count - 1) / 2,
                     row: row - (ROWS - 1) / 2,
                     swayMode: stand.swayMode,
+                    // Raw indices (not the centered col/row above) so callers
+                    // can pick out a specific block of seats — the player
+                    // slots come from stand 0's front row, see Crowd.js
+                    standIndex,
+                    standRow: row,
                 })
             }
         }

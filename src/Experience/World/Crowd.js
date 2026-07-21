@@ -105,6 +105,14 @@ const MAX_IMAGE_COPIES = 8
 // one person occupies, so it's the same unit as the images' pixel widths)
 const IMAGE_SPACING = 12
 
+// Real players sit in the crowd rather than in their own seating: this many
+// slots at the centre of the middle stand's front row are handed to them.
+// Their fake bodies are hidden, but their lightsticks stay in the instanced
+// mesh — so a player's stick waves, sways and joins card stunts for free.
+const PLAYER_SLOT_COUNT = 10
+const PLAYER_SLOT_STAND = 0 // STANDS[0] — the middle stand, behind the stage
+const PLAYER_SLOT_ROW = 0 // front row
+
 // Uniform arrays are fixed-size: room for this many member colors per song
 const MAX_PALETTE = 12
 
@@ -236,6 +244,16 @@ export default class Crowd {
         this.resources = this.experience.resources
 
         this.slots = buildCrowdSlots()
+        this.playerSlots = this.reservePlayerSlots()
+        // instance index -> seat index, so the shader (via crowdWave.w) and
+        // the occupancy toggles can find a reserved slot's seat
+        this.playerSlotSeat = new Map(this.playerSlots.map((instanceIndex, seatIndex) => [instanceIndex, seatIndex]))
+        // seatIndex of every reserved slot a real player currently occupies;
+        // empty ones hide their pill AND lightstick (no orphan over a gap)
+        this.occupiedSeats = new Set()
+        // Per-seat pill colour: a seated player recolours their crowd body
+        // to their own colour (crowdWave.w carries the seat index, -1 = crowd)
+        this.uPlayerColors = uniformArray(Array.from({length: PLAYER_SLOT_COUNT}, () => new THREE.Color('#4a4260')))
 
         // How many columns make up a full turn. The strip is positioned by
         // angle (so a column sits at the same azimuth on every row), and
@@ -653,19 +671,101 @@ export default class Crowd {
         return slots
     }
 
-    fillInstances(mesh) {
+    // The centre of the middle stand's front row, handed over to real
+    // players. Returns the slot indices, left to right.
+    reservePlayerSlots() {
+        const rowIndices = []
+
+        this.slots.forEach((slot, index) => {
+            if (slot.standIndex === PLAYER_SLOT_STAND && slot.standRow === PLAYER_SLOT_ROW)
+                rowIndices.push(index)
+        })
+
+        // Slots are generated left to right within a row, so the middle
+        // block is just the centre of that list
+        const first = Math.max(0, Math.floor((rowIndices.length - PLAYER_SLOT_COUNT) / 2))
+
+        return rowIndices.slice(first, first + PLAYER_SLOT_COUNT)
+    }
+
+    // `hidden` is a Set of instance indices to collapse. Reserved player
+    // slots hide their fake body always, and their lightstick while empty.
+    fillInstances(mesh, hidden = null) {
         const dummy = new THREE.Object3D()
 
         this.slots.forEach((slot, index) => {
             dummy.position.copy(slot.position)
             dummy.rotation.y = slot.facing
-            dummy.scale.setScalar(slot.scale)
+            // Zero scale is the cheapest way to drop an instance: it stays
+            // in the buffer (so indices keep lining up with the attributes)
+            // but collapses to a point and rasterises nothing
+            dummy.scale.setScalar(hidden?.has(index) ? 0 : slot.scale)
             dummy.updateMatrix()
             mesh.setMatrixAt(index, dummy.matrix)
         })
 
         mesh.instanceMatrix.needsUpdate = true
         mesh.frustumCulled = false
+    }
+
+    // Reserved slots with no player seated: their pill and lightstick are
+    // both hidden, so an empty seat shows nothing (no orphan pill/stick)
+    emptyPlayerSlotSet() {
+        const hidden = new Set()
+
+        this.playerSlots.forEach((instanceIndex, seatIndex) => {
+            if (!this.occupiedSeats.has(seatIndex))
+                hidden.add(instanceIndex)
+        })
+
+        return hidden
+    }
+
+    // Collapse or restore one instance's matrix in a mesh (scale 0 = hidden)
+    setInstanceVisible(mesh, instanceIndex, visible) {
+        if (!mesh)
+            return
+
+        const slot = this.slots[instanceIndex]
+        const dummy = new THREE.Object3D()
+        dummy.position.copy(slot.position)
+        dummy.rotation.y = slot.facing
+        dummy.scale.setScalar(visible ? slot.scale : 0)
+        dummy.updateMatrix()
+        mesh.setMatrixAt(instanceIndex, dummy.matrix)
+        mesh.instanceMatrix.needsUpdate = true
+    }
+
+    // PlayerManager calls this as players arrive and leave. A taken seat
+    // reveals its crowd pill (recoloured to the player) and lightstick;
+    // vacating hides both. Touches only the one seat's instances.
+    setPlayerSlotOccupied(seatIndex, occupied, colorHex = null) {
+        const instanceIndex = this.playerSlots[seatIndex]
+
+        if (instanceIndex === undefined)
+            return
+
+        if (occupied)
+            this.occupiedSeats.add(seatIndex)
+        else
+            this.occupiedSeats.delete(seatIndex)
+
+        if (occupied && colorHex)
+            this.uPlayerColors.array[seatIndex].set(colorHex)
+
+        this.setInstanceVisible(this.bodies, instanceIndex, occupied)
+        this.setInstanceVisible(this.lightsticks, instanceIndex, occupied)
+    }
+
+    // Where a player sits, in the shape Character expects. Falls back to the
+    // first reserved slot if the room ever hands out more seats than exist.
+    getSeatTransform(seatIndex) {
+        const slot = this.slots[this.playerSlots[seatIndex] ?? this.playerSlots[0]]
+
+        return {
+            position: slot.position.clone(),
+            rotationY: slot.facing,
+        }
     }
 
     // Packed per-instance data. WebGPU allows only 8 vertex buffers per
@@ -682,6 +782,9 @@ export default class Crowd {
             wave[index * 4] = slot.distance
             wave[index * 4 + 1] = slot.angle
             wave[index * 4 + 2] = slot.swayMode ?? 0
+            // Reserved player seat index, or -1 for ordinary crowd — drives
+            // the per-player pill colour in setBodies
+            wave[index * 4 + 3] = this.playerSlotSeat.get(index) ?? -1
 
             grid[index * 2] = slot.col
             grid[index * 2 + 1] = slot.row
@@ -717,7 +820,7 @@ export default class Crowd {
         })
 
         if (this.bodies)
-            this.fillInstances(this.bodies)
+            this.fillInstances(this.bodies, this.emptyPlayerSlotSet())
 
         if (this.anchorAttribute) {
             const anchors = this.anchorAttribute.array
@@ -985,7 +1088,18 @@ export default class Crowd {
         this.setInstanceAttributes(geometry)
 
         const material = new THREE.MeshStandardNodeMaterial()
-        material.colorNode = mix(color('#232030'), color('#4a4260'), hash(instanceIndex.add(3)))
+        const crowdColor = mix(color('#232030'), color('#4a4260'), hash(instanceIndex.add(3)))
+        // A reserved seat (crowdWave.w >= 0) wears its player's colour; the
+        // rest of the audience keeps the dark crowd tone
+        // seatSlot is -1 for ordinary crowd, 0..9 for reserved seats. It
+        // reaches the fragment stage as an interpolated varying, so a whole
+        // integer arrives as e.g. 1.0 ± 1e-7; add 0.5 before truncating so
+        // that wobble rounds to the right index instead of dithering between
+        // neighbouring colours (seat 0 was safe only because max(0) clamps it)
+        const seatSlot = attribute('crowdWave', 'vec4').w
+        const seatIndex = seatSlot.max(0).add(0.5).toInt()
+        const playerColor = this.uPlayerColors.element(seatIndex)
+        material.colorNode = select(seatSlot.greaterThan(-0.5), playerColor, crowdColor)
 
         const jitter = hash(instanceIndex).mul(Math.PI * 2)
         const bob = abs(sin(this.uSwayPhase.mul(0.5).add(jitter))).mul(0.05)
@@ -994,7 +1108,7 @@ export default class Crowd {
         material.positionNode = positionLocal.add(vec3(0, bob.add(hop), 0))
 
         this.bodies = new THREE.InstancedMesh(geometry, material, this.slots.length)
-        this.fillInstances(this.bodies)
+        this.fillInstances(this.bodies, this.emptyPlayerSlotSet())
         this.scene.add(this.bodies)
     }
 
@@ -1262,7 +1376,7 @@ export default class Crowd {
         material.positionNode = rotated.add(vec3(0, move.mul(this.uWaveLift), 0))
 
         this.lightsticks = new THREE.InstancedMesh(geometry, material, this.slots.length)
-        this.fillInstances(this.lightsticks)
+        this.fillInstances(this.lightsticks, this.emptyPlayerSlotSet())
         this.scene.add(this.lightsticks)
     }
 

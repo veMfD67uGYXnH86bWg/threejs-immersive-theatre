@@ -1,16 +1,21 @@
 import Experience from '../Experience.js'
 import Character from './Character.js'
+import stringToColor from '../utils/stringToColor.js'
 
 /**
  * Keeps the 3D characters in sync with the room state held by NetworkManager:
  * spawns one Character per player on their assigned seat, removes them when
  * they leave, and forwards emotes.
+ *
+ * Seats are slots in the crowd itself (the middle stand's front row), so
+ * players sit among the audience — the fake body of each taken slot is
+ * hidden, while its lightstick stays and becomes the player's own.
  */
 export default class PlayerManager {
     constructor() {
         this.experience = new Experience()
         this.network = this.experience.network
-        this.theatreSeats = this.experience.world.theatreSeats
+        this.crowd = this.experience.world.crowd
 
         this.characters = new Map()
 
@@ -42,10 +47,6 @@ export default class PlayerManager {
         this.network.on('emotePlayed', ({id, emoteId}) => {
             this.characters.get(id)?.playEmote(emoteId)
         })
-
-        this.network.on('lightstickToggled', ({id, active}) => {
-            this.characters.get(id)?.setLightstickActive(active)
-        })
     }
 
     syncFromNetwork() {
@@ -59,12 +60,19 @@ export default class PlayerManager {
         if (this.characters.has(player.id))
             return
 
-        const seatTransform = this.theatreSeats.getSeatTransform(player.seatIndex)
+        const seatTransform = this.crowd.getSeatTransform(player.seatIndex)
         const character = new Character(player, seatTransform, {
             isSelf: player.id === this.network.selfId,
         })
 
         this.characters.set(player.id, character)
+        // Reveal the crowd pill + lightstick at this seat, tinting the pill
+        // to the player's colour (same seed as their old avatar sphere)
+        this.crowd.setPlayerSlotOccupied(
+            player.seatIndex,
+            true,
+            stringToColor(player.username + player.id),
+        )
     }
 
     despawn(id) {
@@ -72,6 +80,9 @@ export default class PlayerManager {
 
         if (!character)
             return
+
+        // Hide the seat's pill + lightstick again — nobody's there
+        this.crowd.setPlayerSlotOccupied(character.player.seatIndex, false)
 
         character.destroy()
         this.characters.delete(id)

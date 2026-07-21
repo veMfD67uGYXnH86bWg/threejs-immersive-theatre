@@ -62,16 +62,6 @@ export default class NetworkManager extends EventEmitter {
             this.trigger('emotePlayed', [{id, emoteId, at}])
         })
 
-        this.socket.on('player:lightstick', ({id, active}) => {
-            const player = this.players.get(id)
-
-            if (!player)
-                return
-
-            player.lightstick = active
-            this.trigger('lightstickToggled', [{id, active}])
-        })
-
         this.socket.on('dance:state', (dance) => {
             this.dance = dance
             this.trigger('danceStateChanged', [dance])

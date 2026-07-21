@@ -6,7 +6,8 @@ import Stage from './Stage.js'
 // Swap back to './Stadium.js' for the old rectangular layout
 import Stadium from './StadiumBowl.js'
 import Crowd from './Crowd.js'
-import TheatreSeats from './TheatreSeats.js'
+// TheatreSeats.js is unused: players now sit in the crowd itself
+// (Crowd.reservePlayerSlots). Kept around as a reference prop.
 import PlayerManager from './PlayerManager.js'
 import ChatBubbles from './ChatBubbles.js'
 import Dancer from './Dancer.js'
@@ -24,7 +25,7 @@ export default class World {
             this.stadium = new Stadium()
             this.crowd = new Crowd()
             this.dancer = new Dancer()
-            this.theatreSeats = new TheatreSeats()
+            // After Crowd: PlayerManager takes its seats from the crowd
             this.playerManager = new PlayerManager()
             this.chatBubbles = new ChatBubbles()
         })

@@ -1,16 +1,19 @@
 import * as THREE from 'three/webgpu'
 import Experience from '../Experience.js'
-import stringToColor from '../utils/stringToColor.js'
-import songs from '../../../shared/songs.js'
 
-const SPHERE_RADIUS = 0.35
-const IDLE_TEMPO = 90 // sway BPM while no song is playing
-const SWING_AMPLITUDE = 0.45 // radians
+// The crowd pill this player occupies is about this tall (see
+// Crowd.setBodies); used to float the name label above it
+const BODY_HEIGHT = 0.55 + 0.28 * 2
 
 /**
- * Placeholder character: a colored sphere with a username label.
- * Will be replaced by a customizable rigged model later — keep the public
- * surface (constructor(player, seatTransform), playEmote, destroy) stable.
+ * A seated player's overlay: a username label and positional emote audio.
+ * The player's actual BODY is the crowd's own instanced pill at their seat
+ * (Crowd reveals and recolours it on join), so it sways, hops on waves and
+ * joins card stunts with the rest of the audience for free — this object
+ * carries no mesh of its own.
+ *
+ * Keep the public surface (constructor(player, seatTransform), playEmote,
+ * destroy) stable.
  */
 export default class Character {
     constructor(player, seatTransform, {isSelf = false} = {}) {
@@ -23,7 +26,6 @@ export default class Character {
 
         this.setModel()
         this.setNameLabel()
-        this.setLightstick()
 
         console.log(`Character loaded (${this.player.username})`)
     }
@@ -32,16 +34,6 @@ export default class Character {
         this.group = new THREE.Group()
         this.group.position.copy(this.seatTransform.position)
         this.group.rotation.y = this.seatTransform.rotationY
-
-        const geometry = new THREE.SphereGeometry(SPHERE_RADIUS, 32, 16)
-        const material = new THREE.MeshStandardNodeMaterial({
-            color: stringToColor(this.player.username + this.player.id),
-        })
-
-        this.body = new THREE.Mesh(geometry, material)
-        this.body.position.y = SPHERE_RADIUS
-        this.body.castShadow = true
-        this.group.add(this.body)
 
         this.scene.add(this.group)
     }
@@ -73,60 +65,8 @@ export default class Character {
 
         this.label = new THREE.Sprite(material)
         this.label.scale.set(1.6, 0.4, 1)
-        this.label.position.y = SPHERE_RADIUS * 2 + 0.45
+        this.label.position.y = BODY_HEIGHT + 0.35
         this.group.add(this.label)
-    }
-
-    // Held to the side of the sphere, tip glowing in the character's color;
-    // hidden until the player toggles it (lightstick emote)
-    setLightstick() {
-        this.lightstickPivot = new THREE.Group()
-        this.lightstickPivot.position.set(SPHERE_RADIUS + 0.08, SPHERE_RADIUS, 0)
-        this.lightstickPivot.visible = this.player.lightstick === true
-
-        const handleGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.28)
-        const handleMaterial = new THREE.MeshStandardNodeMaterial({color: '#222228'})
-        const handle = new THREE.Mesh(handleGeometry, handleMaterial)
-        handle.position.y = 0.14
-        this.lightstickPivot.add(handle)
-
-        const tipGeometry = new THREE.SphereGeometry(0.07, 16, 8)
-        const tipMaterial = new THREE.MeshStandardNodeMaterial({
-            color: '#ffffff',
-            emissive: stringToColor(this.player.username + this.player.id),
-            emissiveIntensity: 2.5,
-        })
-        this.lightstickTip = new THREE.Mesh(tipGeometry, tipMaterial)
-        this.lightstickTip.position.y = 0.33
-        this.lightstickPivot.add(this.lightstickTip)
-
-        this.group.add(this.lightstickPivot)
-    }
-
-    setLightstickActive(active) {
-        this.lightstickPivot.visible = active
-    }
-
-    // Pure function of the synced clock and the song's tempo, so every
-    // client's lightstick sea sways in unison: one full cycle per two beats
-    updateLightstick() {
-        if (!this.lightstickPivot.visible)
-            return
-
-        const network = this.experience.network
-        const dance = network.dance
-
-        let tempo = IDLE_TEMPO
-        let time = network.serverClock.now() / 1000
-
-        if (dance?.phase === 'playing') {
-            const song = songs.find((candidate) => candidate.id === dance.songId)
-            tempo = song?.tempo ?? IDLE_TEMPO
-            time = Math.max(0, (network.serverClock.now() - dance.startedAt) / 1000)
-        }
-
-        const phase = time * (tempo / 60) * Math.PI
-        this.lightstickPivot.rotation.z = Math.sin(phase) * SWING_AMPLITUDE
     }
 
     playEmote(emoteId) {
@@ -152,7 +92,7 @@ export default class Character {
         if (!this.emoteSound) {
             this.emoteSound = new THREE.PositionalAudio(audio.listener)
             this.emoteSound.setRefDistance(3)
-            this.emoteSound.position.y = SPHERE_RADIUS
+            this.emoteSound.position.y = BODY_HEIGHT / 2
             this.group.add(this.emoteSound)
         }
 
@@ -164,8 +104,6 @@ export default class Character {
     }
 
     update() {
-        this.updateLightstick()
-
         // Will drive the AnimationMixer once characters are animated
     }
 
@@ -174,11 +112,7 @@ export default class Character {
             this.emoteSound.stop()
 
         this.scene.remove(this.group)
-        this.body.geometry.dispose()
-        this.body.material.dispose()
         this.label.material.dispose()
         this.labelTexture.dispose()
-        this.lightstickTip.geometry.dispose()
-        this.lightstickTip.material.dispose()
     }
 }

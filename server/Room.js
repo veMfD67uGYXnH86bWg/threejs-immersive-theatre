@@ -156,7 +156,6 @@ export default class Room {
             id: socketId,
             username,
             seatIndex,
-            lightstick: false,
             chatTimestamps: [],
         }
         this.players.set(socketId, player)
@@ -210,7 +209,6 @@ export default class Room {
             id: player.id,
             username: player.username,
             seatIndex: player.seatIndex,
-            lightstick: player.lightstick,
         }
     }
 

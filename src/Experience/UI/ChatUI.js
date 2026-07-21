@@ -1,8 +1,9 @@
 import Experience from '../Experience.js'
-import {CHAT_PATTERN} from '../../../shared/validation.js'
+import {CHAT_PATTERN, containsUrl} from '../../../shared/validation.js'
 
 const MAX_MESSAGES_IN_DOM = 100
 const INVALID_TEXT_NOTICE = 'Message contains unsupported characters'
+const LINK_NOTICE = 'Links aren\'t allowed in chat'
 
 export default class ChatUI {
     constructor() {
@@ -28,14 +29,22 @@ export default class ChatUI {
             if (!text)
                 return
 
-            // Same rule the server enforces — fail fast, no round trip
+            // Clear the box on every submission, valid or not — a rejected
+            // message is gone with just the notice to explain why
+            this.input.value = ''
+
+            // Same rules the server enforces — fail fast, no round trip
             if (!CHAT_PATTERN.test(text)) {
                 this.addSystemMessage(INVALID_TEXT_NOTICE)
                 return
             }
 
+            if (containsUrl(text)) {
+                this.addSystemMessage(LINK_NOTICE)
+                return
+            }
+
             this.network.sendChat(text)
-            this.input.value = ''
         })
 
         this.input.addEventListener('keydown', (event) => {
@@ -59,9 +68,12 @@ export default class ChatUI {
         })
 
         this.network.on('chatBlocked', ({reason} = {}) => {
-            this.addSystemMessage(reason === 'invalid'
-                ? INVALID_TEXT_NOTICE
-                : 'Your message was blocked by moderation')
+            if (reason === 'invalid')
+                this.addSystemMessage(INVALID_TEXT_NOTICE)
+            else if (reason === 'link')
+                this.addSystemMessage(LINK_NOTICE)
+            else
+                this.addSystemMessage('Your message was blocked by moderation')
         })
 
         this.network.on('playerJoined', (player) => {

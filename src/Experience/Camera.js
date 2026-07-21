@@ -61,15 +61,16 @@ export default class Camera {
         if (!view.seat)
             return {position: view.position, target: view.target}
 
-        // Eye level above the player's own seat, looking at the stage
+        // Eye level above the player's own seat in the crowd, looking at
+        // the stage
         const network = this.experience.network
-        const theatreSeats = this.experience.world?.theatreSeats
+        const crowd = this.experience.world?.crowd
         const player = network.players.get(network.selfId)
 
-        if (!player || !theatreSeats)
+        if (!player || !crowd)
             return null
 
-        const seatPosition = theatreSeats.getSeatTransform(player.seatIndex).position
+        const seatPosition = crowd.getSeatTransform(player.seatIndex).position
 
         return {
             position: [seatPosition.x, seatPosition.y + 1.05, seatPosition.z],

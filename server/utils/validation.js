@@ -1,5 +1,8 @@
 import {USERNAME_PATTERN, CHAT_PATTERN} from '../../shared/validation.js'
 
+// Re-exported so callers get all chat checks from one module
+export {containsUrl} from '../../shared/validation.js'
+
 const EMOTE_ID_MAX_LENGTH = 24
 
 export function sanitizeUsername(raw) {

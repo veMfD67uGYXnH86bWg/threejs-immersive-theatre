@@ -20,12 +20,6 @@ export default class EmoteBarUI {
     }
 
     setNetworkEvents() {
-        // Reflect your own toggle emotes (lightstick) on their buttons
-        this.network.on('lightstickToggled', ({id, active}) => {
-            if (id === this.network.selfId)
-                this.buttons.get('lightstick')?.classList.toggle('active', active)
-        })
-
         this.network.on('roomLeft', () => {
             for (const button of this.buttons.values())
                 button.classList.remove('active')
