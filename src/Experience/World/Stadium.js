@@ -35,7 +35,7 @@ export default class Stadium {
         const material = new THREE.MeshStandardNodeMaterial({color: '#101016'})
 
         this.ground = new THREE.Mesh(geometry, material)
-        this.ground.position.y = -0.11
+        this.ground.position.y = -0.12
         this.scene.add(this.ground)
     }
 

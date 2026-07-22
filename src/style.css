@@ -404,8 +404,11 @@ body {
 
 /* The visible pieces carry the panel look themselves */
 #video-frame {
-    width: 180px;
-    height: 180px;
+    /*width: 240px;*/
+    min-width: 130px;
+    max-width: 240px;
+    width: 10dvw;
+    aspect-ratio: 1;
     background: rgba(20, 18, 26, 0.85);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0 12px 12px 12px;
@@ -458,6 +461,9 @@ body {
     display: flex;
     justify-content: center;
     align-items: center;
+    backdrop-filter: blur(8px);
+    padding: 4px 15px;
+    cursor: pointer;
 }
 
 .video-tab:not(.video-spacer):hover {
@@ -596,7 +602,8 @@ body {
 .camera-view-row {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 16px;
+    justify-content: space-around;
 }
 
 #camera-view span {

@@ -26,7 +26,7 @@ export default class Stage {
         const wallGeometry = new THREE.BoxGeometry(12, 6, 0.3)
         const wallMaterial = new THREE.MeshStandardNodeMaterial({color: '#1a1a24'})
         this.backWall = new THREE.Mesh(wallGeometry, wallMaterial)
-        this.backWall.position.set(0, 3, -9.35)
+        this.backWall.position.set(0, 3.6, -9.35)
         this.backWall.receiveShadow = true
         this.group.add(this.backWall)
 

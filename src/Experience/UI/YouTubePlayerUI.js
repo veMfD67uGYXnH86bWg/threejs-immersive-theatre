@@ -92,10 +92,11 @@ export default class YouTubePlayerUI {
     // decoupled from the video panel (controls live in #room-panel), so
     // hiding the video won't touch playback or volume.
     toggleVideo() {
+        const offset = this.element.offsetWidth - 42
         const timeline = gsap.timeline({
             defaults: {duration: 0.75, ease: 'power3.inOut'},
         })
-        timeline.to(this.element, {x: this.toggled ? 0 : 193}, 0)
+        timeline.to(this.element, {x: this.toggled ? 0 : offset}, 0)
         this.toggled = !this.toggled
         this.hideButton.textContent = this.toggled ? '⬅️' : '➡️'
     }

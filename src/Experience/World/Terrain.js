@@ -41,7 +41,8 @@ export default class Terrain {
 
         this.model = new THREE.Mesh(geometry, material)
         this.model.rotation.x = -Math.PI / 2
-        this.model.position.set(0, 0, 0)
+        this.model.position.set(0, 0.1, 0)
+        this.model.scale.set(5, 1.59, 1)
         this.scene.add(this.model)
 
         this.model.traverse((child) => {
