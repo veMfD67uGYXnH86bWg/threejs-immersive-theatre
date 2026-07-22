@@ -82,18 +82,62 @@
  * ('wave' and 'imageSweep' contend for the wave machinery; 'stickColor' is
  * independent and can overlap either).
  */
+
+const flickerLemonade = {
+    action: 'imageFlicker',
+    images: ['lemonade1'],
+    rate: 128 / 60,
+    duty: 0.75,
+    fade: 0.1,
+    center: false,
+    // ease: {out: 0.5},
+}
+
+const chorusLemonade = {
+    action: 'wave',
+    pattern: 'radial',
+    colors: ['#e0ef00', '#2b6b0b'],
+    lift: 1.15,
+    interval: 1.2,
+    speed: 22,
+    ease: {in: 1, out: 1}
+}
+
+const prechorusLemonade = {
+    action: 'wave',
+    pattern: 'sweep',
+    colorMode: 'perWave',
+    colors: ['#e0ef00', '#2b6b0b', '#ffffd1'],
+    lift: 1.15,
+    interval: 0.55,
+    lapTime: 4,
+    width: 0.348,
+    ease: {in: 1, out: 1}
+}
+
+const verseLemonade = {
+    action: 'wave',
+    pattern: 'sweep',
+    lapTime: 5,
+    lift: 1.4,
+    ease: {in: 1, out: 1}
+}
+
 export default {
+
+
     // Lemonade — Aespa
     'song-a': [
+        // Intro
         {
             at: 0,
-            until: 16,
+            until: 9,
             action: 'imageSweep',
             images: ['giselle2', 'karina2', 'ningning2', 'winter2'],
             spacing: 30,
             lapTime: 8,
             blackout: true,
-            ease: {out: 0.5},
+            ease: {in: 1, out: 1}
         },
         {
             at: 20,
@@ -108,93 +152,118 @@ export default {
             ease: {out: 0.5},
 
         },
+        // Verse 1
+        {
+            at: 23,
+            until: 40.5,
+            ...verseLemonade,
+        },
         {
             at: 40.5,
             until: 54,
-            action: 'wave',
-            pattern: 'sweep',
-            lapTime: 5,
-            lift: 1.4,
-            ease: 1
+            ...verseLemonade,
+            direction: 'ccw',
         },
         {
             at: 60,
-            until: 62,
-            action: 'imageFlicker',
-            images: ['lemonade1'],
-            rate: 128 / 60,
-            duty: 0.75,
-            fade: 0.1,
-            center: false,
+            until: 62.25,
+            ...flickerLemonade,
+        },
 
+        // Pre-Chorus 1
+        {
+            at: 54,
+            until: 69,
+            ...prechorusLemonade,
         },
         {
             at: 67,
-            until: 69,
-            action: 'imageFlicker',
-            images: ['lemonade1'],
-            rate: 128 / 60,
-            duty: 0.75,
-            fade: 0.1,
-            center: false,
-            ease: {out: 0.5},
+            until: 69.25,
+            ...flickerLemonade,
 
         },
+
+        // Chorus 1
         {
             at: 69,
             until: 84.5,
-            action: 'wave',
-            pattern: 'radial',
-            colors: ['#e0ef00', '#2b6b0b'],
-            lift: 1.15,
-            interval: 1.2,
-            speed: 22
+            ...chorusLemonade,
         },
+        {
+            at: 82,
+            until: 84.25,
+            ...flickerLemonade,
+        },
+        // Verse 2
+        {
+            at: 86,
+            until: 101,
+            ...verseLemonade,
+        },
+        // Pre-Chorus 2
         {
             at: 101,
             until: 116,
-            action: 'wave',
-            pattern: 'sweep',
-            colorMode: 'perWave',
-            colors: ['#e0ef00', '#2b6b0b', '#ffffd1'],
-            lift: 1.15,
-            interval: 0.55,
-            lapTime: 4,
-            width: 0.348,
-            ease: {in: 1}
+            ...prechorusLemonade,
+        },
+        {
+            at: 106.5,
+            until: 108.75,
+            ...flickerLemonade
+        },
+        {
+            at: 114,
+            until: 116.25,
+            ...flickerLemonade
         },
 
+        // Chorus 2
+        {
+            at: 116,
+            until: 131,
+            ...chorusLemonade,
+        },
+        {
+            at: 129,
+            until: 131.25,
+            ...flickerLemonade
+        },
 
-        // {
-        //     at: 20,
-        //     until: 44,
-        //     action: 'imageSweep',
-        //     images: ['lemonade1', 'lemonade2'],
-        //     copies: 2,
-        //     lapTime: 10,
-        //     direction: 'ccw',
-        //     blackout: false,
-        // },
-        // {
-        //     at: 44,
-        //     until: 60,
-        //     action: 'wave',
-        //     pattern: 'radial',
-        //     colors: ['#ffd166', '#ff9de2'],
-        //     repeats: 3,
-        //     interval: 1.5,
-        //     ease: {in: 0.5, out: 2}
-        // },
-        // {
-        //     at: 62,
-        //     until: 70,
-        //     action: 'imageFlicker',
-        //     images: ['lemonade1', 'lemonade2'],
-        //     rate: 2,
-        //     duty: 1,
-        //     fade: 0.1,
-        //     ease: {in: 0.5, out: 1}
-        // },
+        // Bridge 131 to 154 bridge
+        {
+            at: 131.25,
+            until: 149.5, // 154
+            action: 'imageSweep',
+            images: ['lemonade2', 'lemonade1', 'ningning1', 'winter1', 'giselle1', 'karina1'],
+            spacing: 30,
+            start: -550,
+            lapTime: 8,
+            loop: false,
+            blackout: true,
+            ease: {in: 1, out: 1}
+        },
+        // Chorus 3
+        {
+            at: 153.5,
+            until: 183,
+            ...chorusLemonade,
+        },
+        {
+            at: 159,
+            until: 161.25,
+            ...flickerLemonade
+        },
+        {
+            at: 167,
+            until: 169.25,
+            ...flickerLemonade
+        },
+        {
+            at: 181.5,
+            until: 183.75,
+            ...flickerLemonade
+        },
+
     ],
 
     // Love Dive — IVE
@@ -234,20 +303,6 @@ export default {
 
     // The Cycle Ends - Lena Raine
     'song-d': [
-        // {
-        //     at: 0,
-        //     until: 181,
-        //     action: 'wave',
-        //     pattern: 'radial',
-        //     colorMode: 'perWave',
-        //     // colors: ['#76E1CE', '#56A4B8', '#498B8F'],
-        //     colors: ['#76E1CE', '#3ef500', '#f80000'],
-        //     lift: 1.15,
-        //     interval: 1.2,
-        //     speed: 22,
-        //     ease: {in: 2}
-        // },
-
         {
             at: 0,
             until: 181,
@@ -262,22 +317,11 @@ export default {
             width: 0.348,
             ease: {in: 1}
         },
-        // {
-        //     at: 0,
-        //     until: 181,
-        //     action: 'wave',
-        //     pattern: 'radial',
-        //     colorMode: 'perWave',
-        //     colors: ['#76E1CE', '#56A4B8', '#4E9496'],
-        //     lift: 1.15,
-        //     interval: 0.55,
-        //     lapTime: 4,
-        //     width: 0.348,
-        //     ease: {in: 2}
-        // },
-        // 76E1CE
     ],
 
     // Obsession - EXO
     'song-e': [],
+
+    // Here, Tomorrow - Lilas, Kevin Penkin, League of Legends
+    'song-f': [],
 }
