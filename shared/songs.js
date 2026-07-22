@@ -30,7 +30,7 @@ export default [
         id: 'song-b',
         name: 'Love Dive',
         artist: 'IVE',
-        youtubeId: 'l-jZOXa7gQY',
+        youtubeId: 'hh5GKVa8VtM',
         duration: 177000,
         tempo: 118,
         colors: ['#0e8bff', '#f74ae3', '#ffffff', "#d92133"]

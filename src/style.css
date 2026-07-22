@@ -1,574 +1,628 @@
 * {
-  margin: 0;
-  padding: 0;
+    margin: 0;
+    padding: 0;
 }
 
 html,
 body {
-  overflow: hidden;
-  touch-action: none;
-  overscroll-behavior: none;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
 }
 
 .webgl {
-  position: fixed;
-  top: 0;
-  left: 0;
-  outline: none;
-  touch-action: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    outline: none;
+    touch-action: none;
 }
 
 :root {
-  --classic-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-  --tp-base-background-color: hsla(40, 3%, 90%, 1.00);
-  --tp-base-shadow-color: hsla(0, 0%, 0%, 0.30);
-  --tp-button-background-color: hsla(40, 3%, 70%, 1.00);
-  --tp-button-background-color-active: hsla(40, 3%, 55%, 1.00);
-  --tp-button-background-color-focus: hsla(40, 3%, 60%, 1.00);
-  --tp-button-background-color-hover: hsla(40, 3%, 65%, 1.00);
-  --tp-button-foreground-color: hsla(40, 3%, 20%, 1.00);
-  --tp-container-background-color: hsla(40, 3%, 70%, 1.00);
-  --tp-container-background-color-active: hsla(40, 3%, 55%, 1.00);
-  --tp-container-background-color-focus: hsla(40, 3%, 60%, 1.00);
-  --tp-container-background-color-hover: hsla(40, 3%, 65%, 1.00);
-  --tp-container-foreground-color: hsla(40, 0%, 0%, 1.00);
-  --tp-groove-foreground-color: hsla(40, 3%, 40%, 1.00);
-  --tp-input-background-color: hsla(120, 3%, 20%, 1.00);
-  --tp-input-background-color-active: hsla(120, 3%, 35%, 1.00);
-  --tp-input-background-color-focus: hsla(120, 3%, 30%, 1.00);
-  --tp-input-background-color-hover: hsla(120, 3%, 25%, 1.00);
-  --tp-input-foreground-color: hsla(120, 40%, 60%, 1.00);
-  --tp-label-foreground-color: hsla(40, 0%, 4%, 1.00);
-  --tp-monitor-background-color: hsla(120, 3%, 20%, 1.00);
-  --tp-monitor-foreground-color: hsla(120, 40%, 60%, 0.80);
+    --classic-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+    --tp-base-background-color: hsla(40, 3%, 90%, 1.00);
+    --tp-base-shadow-color: hsla(0, 0%, 0%, 0.30);
+    --tp-button-background-color: hsla(40, 3%, 70%, 1.00);
+    --tp-button-background-color-active: hsla(40, 3%, 55%, 1.00);
+    --tp-button-background-color-focus: hsla(40, 3%, 60%, 1.00);
+    --tp-button-background-color-hover: hsla(40, 3%, 65%, 1.00);
+    --tp-button-foreground-color: hsla(40, 3%, 20%, 1.00);
+    --tp-container-background-color: hsla(40, 3%, 70%, 1.00);
+    --tp-container-background-color-active: hsla(40, 3%, 55%, 1.00);
+    --tp-container-background-color-focus: hsla(40, 3%, 60%, 1.00);
+    --tp-container-background-color-hover: hsla(40, 3%, 65%, 1.00);
+    --tp-container-foreground-color: hsla(40, 0%, 0%, 1.00);
+    --tp-groove-foreground-color: hsla(40, 3%, 40%, 1.00);
+    --tp-input-background-color: hsla(120, 3%, 20%, 1.00);
+    --tp-input-background-color-active: hsla(120, 3%, 35%, 1.00);
+    --tp-input-background-color-focus: hsla(120, 3%, 30%, 1.00);
+    --tp-input-background-color-hover: hsla(120, 3%, 25%, 1.00);
+    --tp-input-foreground-color: hsla(120, 40%, 60%, 1.00);
+    --tp-label-foreground-color: hsla(40, 0%, 4%, 1.00);
+    --tp-monitor-background-color: hsla(120, 3%, 20%, 1.00);
+    --tp-monitor-foreground-color: hsla(120, 40%, 60%, 0.80);
 }
 
 .debug-ui {
-  position: fixed;
-  top: 8px;
-  right: 8px;
-  width: 320px;
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    width: 320px;
 }
 
 /* ---------------------------------- UI ---------------------------------- */
 
 #ui {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  font-family: system-ui, -apple-system, sans-serif;
-  color: #f0eef4;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    font-family: system-ui, -apple-system, sans-serif;
+    color: #f0eef4;
 }
 
 #ui .panel {
-  pointer-events: auto;
-  background: rgba(20, 18, 26, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  box-shadow: var(--classic-shadow);
+    pointer-events: auto;
+    background: rgba(20, 18, 26, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: var(--classic-shadow);
 }
 
 .hidden {
-  display: none !important;
+    display: none !important;
 }
 
 #ui button {
-  border: none;
-  border-radius: 8px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.12);
-  color: inherit;
-  font-size: 14px;
-  cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.12);
+    color: inherit;
+    font-size: 14px;
+    cursor: pointer;
 }
 
 #ui button:hover {
-  background: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.22);
 }
 
 #ui button.primary {
-  background: #ff2d95;
-  font-weight: 600;
+    background: #ff2d95;
+    font-weight: 600;
 }
 
 #ui button.primary:hover {
-  background: #ff4da6;
+    background: #ff4da6;
 }
 
 #ui input[type="text"],
 #ui input:not([type]) {
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.35);
-  color: inherit;
-  font-size: 14px;
-  outline: none;
-  min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.35);
+    color: inherit;
+    font-size: 14px;
+    outline: none;
+    min-width: 0;
 }
 
 #ui input:focus {
-  border-color: #ff2d95;
+    border-color: #ff2d95;
 }
 
 /* Lobby */
 
 #lobby {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 300px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 300px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 #lobby h1 {
-  font-size: 22px;
-  text-align: center;
-  color: #ff2d95;
-  margin-bottom: 6px;
+    font-size: 22px;
+    text-align: center;
+    color: #ff2d95;
+    margin-bottom: 6px;
 }
 
 #lobby-home,
 #lobby-invite {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 #lobby-invite-text {
-  font-size: 14px;
-  text-align: center;
-  color: rgba(240, 238, 244, 0.75);
+    font-size: 14px;
+    text-align: center;
+    color: rgba(240, 238, 244, 0.75);
 }
 
 .lobby-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
 .lobby-row input,
 .lobby-row button:first-child {
-  flex: 1;
+    flex: 1;
 }
 
 .lobby-private {
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .lobby-rooms-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 13px;
-  color: rgba(240, 238, 244, 0.6);
-  margin-top: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: rgba(240, 238, 244, 0.6);
+    margin-top: 6px;
 }
 
 .lobby-rooms-header button {
-  padding: 2px 8px;
+    padding: 2px 8px;
 }
 
 #lobby-rooms {
-  list-style: none;
-  max-height: 150px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    list-style: none;
+    max-height: 150px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 #lobby-rooms li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  font-size: 14px;
-  cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 14px;
+    cursor: pointer;
 }
 
 .lobby-room-row {
-  display: flex;
-  justify-content: space-between;
+    display: flex;
+    justify-content: space-between;
 }
 
 .lobby-room-song {
-  font-size: 12px;
-  color: rgba(240, 238, 244, 0.55);
+    font-size: 12px;
+    color: rgba(240, 238, 244, 0.55);
 }
 
 #lobby-rooms li:hover {
-  background: rgba(255, 45, 149, 0.25);
+    background: rgba(255, 45, 149, 0.25);
 }
 
 #lobby-rooms li.full,
 #lobby-rooms li.lobby-rooms-empty {
-  cursor: default;
-  color: rgba(240, 238, 244, 0.45);
+    cursor: default;
+    color: rgba(240, 238, 244, 0.45);
 }
 
 #lobby-rooms li.full:hover,
 #lobby-rooms li.lobby-rooms-empty:hover {
-  background: rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.07);
 }
 
 #lobby-error {
-  min-height: 18px;
-  font-size: 13px;
-  color: #ff6b6b;
-  text-align: center;
+    min-height: 18px;
+    font-size: 13px;
+    color: #ff6b6b;
+    text-align: center;
 }
 
 #lobby-disclaimer {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 #lobby-disclaimer p {
-  font-size: 11px;
-  line-height: 1.4;
-  text-align: center;
-  color: rgba(240, 238, 244, 0.5);
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: center;
+    color: rgba(240, 238, 244, 0.5);
 }
 
 #lobby-disclaimer.highlight {
-  border-top-color: rgba(255, 209, 102, 0.6);
+    border-top-color: rgba(255, 209, 102, 0.6);
 }
 
 #lobby-disclaimer.highlight p {
-  color: #ffd166;
+    color: #ffd166;
 }
 
 .disclaimer-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .disclaimer-actions label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: rgba(240, 238, 244, 0.65);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: rgba(240, 238, 244, 0.65);
 }
 
 .disclaimer-actions button {
-  font-size: 12px;
-  padding: 5px 10px;
+    font-size: 12px;
+    padding: 5px 10px;
 }
 
 /* HUD */
 
 #room-panel {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: stretch;
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: stretch;
 }
 
 #room-panel > * {
-  pointer-events: auto;
+    pointer-events: auto;
 }
 
 #room-info {
-  padding: 8px 14px;
-  font-size: 14px;
-  text-align: center;
+    padding: 8px 14px;
+    font-size: 14px;
+    text-align: center;
 }
 
 .room-actions {
-  display: flex;
-  gap: 6px;
+    display: flex;
+    gap: 6px;
 }
 
 .room-actions button {
-  flex: 1;
-  font-size: 13px;
-  padding: 6px 10px;
+    flex: 1;
+    font-size: 13px;
+    padding: 6px 10px;
 }
 
 #room-leave {
-  flex: 0 0 auto;
-  background: rgba(255, 80, 80, 0.18);
+    flex: 0 0 auto;
+    background: rgba(255, 80, 80, 0.18);
 }
 
 #room-leave:hover {
-  background: rgba(255, 80, 80, 0.35);
+    background: rgba(255, 80, 80, 0.35);
 }
 
 #now-playing {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 8px 14px;
-  font-size: 14px;
-  color: #ff9dcb;
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 8px 14px;
+    font-size: 14px;
+    color: #ff9dcb;
 }
 
 /* Voting */
 
 #voting {
-  position: absolute;
-  top: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 280px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 280px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 .voting-header {
-  display: flex;
-  justify-content: space-between;
-  font-size: 14px;
-  font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 #voting-timer {
-  color: #ff9dcb;
+    color: #ff9dcb;
 }
 
 #voting-songs {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
 #voting-songs li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.07);
-  font-size: 14px;
-  cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 14px;
+    cursor: pointer;
 }
 
 #voting-songs li:hover {
-  background: rgba(255, 45, 149, 0.25);
+    background: rgba(255, 45, 149, 0.25);
 }
 
 #voting-songs li.selected {
-  background: rgba(255, 45, 149, 0.45);
+    background: rgba(255, 45, 149, 0.45);
 }
 
 #voting-songs small {
-  color: rgba(240, 238, 244, 0.5);
-  margin-left: 4px;
+    color: rgba(240, 238, 244, 0.5);
+    margin-left: 4px;
 }
 
 .voting-count {
-  min-width: 22px;
-  text-align: center;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.35);
-  font-size: 13px;
+    min-width: 22px;
+    text-align: center;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.35);
+    font-size: 13px;
 }
 
 /* YouTube player */
 
+/* Pure layout container — no background/border of its own, so cells like
+   .video-spacer are truly transparent down to the canvas. Not a .panel anymore,
+   so it must restore the pointer-events that #ui disables (without this the
+   whole panel, button included, is click-through and un-inspectable) */
 #video-panel {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 320px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: row-reverse;
+    pointer-events: auto;
 }
 
+/* The visible pieces carry the panel look themselves */
 #video-frame {
-  width: 100%;
-  height: 180px;
+    width: 180px;
+    height: 180px;
+    background: rgba(20, 18, 26, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0 12px 12px 12px;
+    overflow: hidden;
+    box-shadow: var(--classic-shadow);
 }
 
 #video-frame iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-  /* Playback is driven by the room clock, not by viewers */
-  pointer-events: none;
+    width: 100%;
+    height: 100%;
+    border: none;
+    /* Playback is driven by the room clock, not by viewers */
+    pointer-events: none;
+
 }
 
 #video-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+    display: flex;
+    /*flex-direction: column;*/
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+}
+
+#video-collapse {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+#video-collapse button {
+    padding: 2px;
+    font-size: 16px;
+    background: transparent;
+}
+
+.video-tab {
+    height: 18%;
+    padding: 6px 10px;
+}
+
+/* The bookmark tab paints its own background; flat on the video side */
+.video-tab:not(.video-spacer) {
+    background: rgba(20, 18, 26, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-right: none;
+    border-radius: 8px 0 0 8px;
+    box-shadow: var(--classic-shadow);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.video-tab:not(.video-spacer):hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+/* Fully transparent spacer — the container has no background either, so the
+   3D canvas shows straight through here */
+.video-spacer {
+    background: none;
+    border: none;
 }
 
 #video-controls button {
-  padding: 2px 6px;
-  font-size: 16px;
-  background: transparent;
+    padding: 2px 6px;
+    font-size: 16px;
+    background: transparent;
 }
 
 #video-volume {
-  flex: 1;
-  accent-color: #ff2d95;
-  cursor: pointer;
+    flex: 1;
+    accent-color: #ff2d95;
+    cursor: pointer;
+    /*writing-mode: vertical-lr;*/
+    /*height: 100%;*/
 }
 
 #chat {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  width: 320px;
-  height: 260px;
-  display: flex;
-  flex-direction: column;
-  padding: 10px;
-  gap: 8px;
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    width: 320px;
+    height: 260px;
+    display: flex;
+    flex-direction: column;
+    padding: 10px;
+    gap: 8px;
 }
 
 #chat-messages {
-  list-style: none;
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 14px;
-  overflow-wrap: anywhere;
+    list-style: none;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 14px;
+    overflow-wrap: anywhere;
 }
 
 #chat-messages .chat-author {
-  font-weight: 600;
-  color: #7cc4ff;
-  margin-right: 6px;
+    font-weight: 600;
+    color: #7cc4ff;
+    margin-right: 6px;
 }
 
 #chat-messages .chat-author.self {
-  color: #ffd166;
+    color: #ffd166;
 }
 
 #chat-messages .chat-system {
-  color: rgba(240, 238, 244, 0.5);
-  font-style: italic;
-  font-size: 13px;
+    color: rgba(240, 238, 244, 0.5);
+    font-style: italic;
+    font-size: 13px;
 }
 
 #chat-form {
-  display: flex;
-  gap: 6px;
+    display: flex;
+    gap: 6px;
 }
 
 #chat-form input {
-  flex: 1;
+    flex: 1;
 }
 
 /* Emote bar */
 
 #emote-bar {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 6px;
-  padding: 8px;
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 6px;
+    padding: 8px;
 }
 
 #emote-bar button {
-  position: relative;
-  width: 46px;
-  height: 46px;
-  font-size: 22px;
-  line-height: 1;
+    position: relative;
+    width: 46px;
+    height: 46px;
+    font-size: 22px;
+    line-height: 1;
 }
 
 #emote-bar .emote-key {
-  position: absolute;
-  bottom: 2px;
-  right: 5px;
-  font-size: 10px;
-  color: rgba(240, 238, 244, 0.6);
+    position: absolute;
+    bottom: 2px;
+    right: 5px;
+    font-size: 10px;
+    color: rgba(240, 238, 244, 0.6);
 }
 
 #emote-bar button:disabled {
-  opacity: 0.4;
-  cursor: default;
+    opacity: 0.4;
+    cursor: default;
 }
 
 #emote-bar button.active {
-  background: rgba(255, 45, 149, 0.45);
+    background: rgba(255, 45, 149, 0.45);
 }
 
 #emote-bar button:disabled:hover {
-  background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.12);
 }
 
 #emote-bar .emote-mute {
-  margin-left: 6px;
-  border-left: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 0 8px 8px 0;
-  font-size: 18px;
+    margin-left: 6px;
+    border-left: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0 8px 8px 0;
+    font-size: 18px;
 }
 
 /* Camera view switcher */
 
 #camera-view {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px 8px;
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px;
 }
 
 .camera-view-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 #camera-view span {
-  min-width: 88px;
-  text-align: center;
-  font-size: 13px;
+    min-width: 88px;
+    text-align: center;
+    font-size: 13px;
 }
 
 .camera-slider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: rgba(240, 238, 244, 0.65);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: rgba(240, 238, 244, 0.65);
 }
 
 .camera-slider input {
-  flex: 1;
-  accent-color: #ff2d95;
-  cursor: pointer;
+    flex: 1;
+    accent-color: #ff2d95;
+    cursor: pointer;
 }
 
 #camera-view button {
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  font-size: 18px;
-  line-height: 1;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    font-size: 18px;
+    line-height: 1;
 }

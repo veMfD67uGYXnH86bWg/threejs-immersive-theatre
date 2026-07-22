@@ -53,6 +53,10 @@
                     <button class="panel" id="room-invite" type="button">Invite friends</button>
                     <button class="panel" id="room-leave" type="button">Leave</button>
                 </div>
+                <div class="panel" id="video-controls">
+                    <button id="video-mute" title="Mute / unmute" type="button">🔇</button>
+                    <input id="video-volume" max="100" min="0" step="1" title="Volume" type="range" value="50">
+                </div>
             </div>
             <div class="panel" id="now-playing"></div>
             <div class="panel hidden" id="voting">
@@ -62,13 +66,13 @@
                 </div>
                 <ul id="voting-songs"></ul>
             </div>
-            <div class="panel hidden" id="video-panel">
+            <div class="hidden" id="video-panel">
                 <div id="video-frame">
                     <div id="youtube-player"></div>
                 </div>
-                <div id="video-controls">
-                    <button id="video-mute" title="Mute / unmute" type="button">🔇</button>
-                    <input id="video-volume" max="100" min="0" step="1" title="Volume" type="range" value="50">
+                <div id="video-collapse">
+                    <div class="video-tab" id="video-hide">➡️</div>
+                    <div class="video-tab video-spacer"></div>
                 </div>
             </div>
             <div class="panel" id="chat">

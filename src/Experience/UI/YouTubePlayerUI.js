@@ -1,5 +1,6 @@
 import Experience from '../Experience.js'
 import songs from '../../../shared/songs.js'
+import {gsap} from 'gsap'
 
 const DRIFT_TOLERANCE = 0.2 // seconds off the room clock before reseeking
 const DRIFT_CHECK_INTERVAL = 2000
@@ -34,6 +35,7 @@ export default class YouTubePlayerUI {
         this.element = document.getElementById('video-panel')
         this.muteButton = document.getElementById('video-mute')
         this.volumeSlider = document.getElementById('video-volume')
+        this.hideButton = document.getElementById('video-hide')
 
         this.player = null
         this.playerReady = false
@@ -41,6 +43,7 @@ export default class YouTubePlayerUI {
         this.seekLead = 0.25 // learned estimate of seek latency, in seconds
         this.settleTimer = null
         this.settleAttempts = 0
+        this.toggled = false
 
         this.muted = false
         this.volume = this.loadVolume()
@@ -81,6 +84,20 @@ export default class YouTubePlayerUI {
 
             this.applyAudioState()
         })
+
+        this.hideButton.addEventListener('click', () => this.toggleVideo())
+    }
+
+    // Placeholder — GSAP show/hide animation goes here later. Audio is
+    // decoupled from the video panel (controls live in #room-panel), so
+    // hiding the video won't touch playback or volume.
+    toggleVideo() {
+        const timeline = gsap.timeline({
+            defaults: {duration: 0.75, ease: 'power3.inOut'},
+        })
+        timeline.to(this.element, {x: this.toggled ? 0 : 193}, 0)
+        this.toggled = !this.toggled
+        this.hideButton.textContent = this.toggled ? '⬅️' : '➡️'
     }
 
     applyAudioState() {
