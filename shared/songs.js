@@ -57,11 +57,11 @@ export default [
     {
 
         id: 'song-e',
-        name: 'Obsession',
+        name: 'Cream Soda',
         artist: 'EXO',
-        youtubeId: 'TadhhUt9BPc',
-        duration: 203000,
-        tempo: 129,
+        youtubeId: 'mA-2ZBpAbeo',
+        duration: 185000,
+        tempo: 156,
     },
     {
 

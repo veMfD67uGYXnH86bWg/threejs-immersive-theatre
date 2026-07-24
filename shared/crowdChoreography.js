@@ -319,7 +319,7 @@ export default {
         },
     ],
 
-    // Obsession - EXO
+    // Cream Soda - EXO
     'song-e': [],
 
     // Here, Tomorrow - Lilas, Kevin Penkin, League of Legends
